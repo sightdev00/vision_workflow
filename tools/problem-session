@@ -1,0 +1,322 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly PROGRAM_NAME="${0##*/}"
+
+die() {
+    printf '%s: %s\n' "$PROGRAM_NAME" "$*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage:
+  tools/problem-session start <topic>
+  tools/problem-session resume
+  tools/problem-session close <session-file>
+
+Commands:
+  start   Create the next Session record and start a new Codex chat.
+  resume  Resume the only active Session and the latest Codex chat in this worktree.
+  close   Validate, close, and commit only the specified Session record.
+
+Topic format:
+  Lowercase letters, digits, and single hyphens, for example: directory-design
+EOF
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+init_context() {
+    require_command git
+
+    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" ||
+        die "not inside a Git worktree"
+    cd "$REPO_ROOT"
+
+    BRANCH="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" ||
+        die "detached HEAD is not supported"
+
+    if [[ ! "$BRANCH" =~ ^problem/(P-[0-9]{3})-[a-z0-9][a-z0-9-]*$ ]]; then
+        die "current branch must match problem/P-001-xxx; got: $BRANCH"
+    fi
+
+    PROBLEM_ID="${BRANCH#problem/}"
+    PROBLEM_PREFIX="${BASH_REMATCH[1]}"
+    SESSION_PLAN="$REPO_ROOT/.problems/$PROBLEM_ID/SESSION-PLAN.md"
+    SESSION_DIR_REL=".problems/$PROBLEM_ID/sessions"
+    SESSION_DIR="$REPO_ROOT/$SESSION_DIR_REL"
+
+    [[ -f "$SESSION_PLAN" ]] ||
+        die "Session plan not found: ${SESSION_PLAN#$REPO_ROOT/}"
+    export SESSION_PLAN
+}
+
+collect_active_sessions() {
+    ACTIVE_SESSIONS=()
+    [[ -d "$SESSION_DIR" ]] || return 0
+
+    local file
+    while IFS= read -r -d '' file; do
+        if grep -Fqx -- '- Status: active' "$file"; then
+            ACTIVE_SESSIONS+=("$file")
+        fi
+    done < <(
+        find "$SESSION_DIR" -maxdepth 1 -type f \
+            -name "${PROBLEM_PREFIX}-S[0-9][0-9][0-9]-*.md" \
+            -print0 | sort -z
+    )
+}
+
+session_id_from_file() {
+    local base="${1##*/}"
+    if [[ "$base" =~ ^(${PROBLEM_PREFIX}-S[0-9]{3})-[a-z0-9][a-z0-9-]*\.md$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+        return 0
+    fi
+    return 1
+}
+
+next_session_id() {
+    local max=0 file base number
+
+    if [[ -d "$SESSION_DIR" ]]; then
+        while IFS= read -r -d '' file; do
+            base="${file##*/}"
+            if [[ "$base" =~ ^${PROBLEM_PREFIX}-S([0-9]{3})- ]]; then
+                number=$((10#${BASH_REMATCH[1]}))
+                ((number > max)) && max=$number
+            fi
+        done < <(
+            find "$SESSION_DIR" -maxdepth 1 -type f \
+                -name "${PROBLEM_PREFIX}-S[0-9][0-9][0-9]-*.md" -print0
+        )
+    fi
+
+    ((max < 999)) || die "Session sequence exhausted at S999"
+    printf '%s-S%03d\n' "$PROBLEM_PREFIX" "$((max + 1))"
+}
+
+write_session_template() {
+    local file="$1" session_id="$2" topic="$3"
+    local started branch_commit
+    started="$(date --iso-8601=seconds)"
+    branch_commit="$(git rev-parse HEAD)"
+
+    [[ ! -e "$file" ]] || die "refusing to overwrite existing file: $file"
+
+    set -o noclobber
+    if ! cat >"$file" <<EOF
+# $session_id $topic
+
+- Problem: $PROBLEM_ID
+- Session: $session_id
+- Status: active
+- Started: $started
+- Branch: $BRANCH
+- Base commit: $branch_commit
+
+## Objective
+
+
+## Inputs
+
+
+## Evidence
+
+
+## Decisions
+
+
+## Changes
+
+
+## Verification
+
+
+## Unresolved
+
+
+## Next Session
+
+EOF
+    then
+        set +o noclobber
+        die "failed to create Session file: $file"
+    fi
+    set +o noclobber
+}
+
+require_section_content() {
+    local file="$1" section="$2"
+    awk -v heading="## $section" '
+        $0 == heading {
+            found = 1
+            inside = 1
+            next
+        }
+        inside && /^## / {
+            inside = 0
+        }
+        inside && $0 ~ /[^[:space:]]/ {
+            content = 1
+        }
+        END {
+            exit !(found && content)
+        }
+    ' "$file" || die "section is missing or empty: $section"
+}
+
+resolve_session_file() {
+    local requested="$1" resolved
+    [[ -n "$requested" ]] || die "Session file is required"
+
+    resolved="$(realpath -m -- "$requested")"
+    case "$resolved" in
+        "$SESSION_DIR"/*) ;;
+        *) die "Session file must be under $SESSION_DIR_REL" ;;
+    esac
+
+    [[ -f "$resolved" ]] || die "Session file not found: $requested"
+    session_id_from_file "$resolved" >/dev/null ||
+        die "invalid Session filename: ${resolved##*/}"
+    printf '%s\n' "$resolved"
+}
+
+start_session() {
+    local topic="${1:-}" session_id session_file session_file_rel prompt
+    [[ "$topic" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] ||
+        die "topic must use lowercase letters, digits, and single hyphens"
+
+    require_command codex
+    collect_active_sessions
+    if ((${#ACTIVE_SESSIONS[@]} > 0)); then
+        die "an active Session already exists: ${ACTIVE_SESSIONS[0]#$REPO_ROOT/}; use '$PROGRAM_NAME resume'"
+    fi
+
+    mkdir -p "$SESSION_DIR"
+    session_id="$(next_session_id)"
+    session_file_rel="$SESSION_DIR_REL/$session_id-$topic.md"
+    session_file="$REPO_ROOT/$session_file_rel"
+    write_session_template "$session_file" "$session_id" "$topic"
+
+    export PROBLEM_ID
+    export SESSION_ID="$session_id"
+    export SESSION_FILE="$session_file"
+
+    prompt="当前 Problem 为 $PROBLEM_ID，当前 Session 为 $SESSION_ID，Session 计划为 ${SESSION_PLAN#$REPO_ROOT/}，Session 记录文件为 $session_file_rel。读取 AGENTS.md、${SESSION_PLAN#$REPO_ROOT/} 和 $session_file_rel；只处理当前 Session 的目标，先与用户明确本次 Objective 和结束条件，再开展工作；在工作过程中持续更新 Session 记录。只有用户明确表示该 Session 可以结束时，才先更新并提交 Session Plan，再按 AGENTS.md 调用 tools/problem-session close。"
+
+    printf 'Starting %s\nSession file: %s\n' "$SESSION_ID" "$session_file_rel"
+    codex -C "$REPO_ROOT" "$prompt"
+}
+
+resume_session() {
+    local session_file session_id
+    require_command codex
+    collect_active_sessions
+
+    ((${#ACTIVE_SESSIONS[@]} > 0)) || die "no active Session found; use '$PROGRAM_NAME start <topic>'"
+    ((${#ACTIVE_SESSIONS[@]} == 1)) || die "multiple active Sessions found; resolve them before resuming"
+
+    session_file="${ACTIVE_SESSIONS[0]}"
+    session_id="$(session_id_from_file "$session_file")" ||
+        die "cannot derive Session ID from ${session_file##*/}"
+
+    export PROBLEM_ID
+    export SESSION_ID="$session_id"
+    export SESSION_FILE="$session_file"
+
+    printf 'Resuming %s\nSession file: %s\n' \
+        "$SESSION_ID" "${SESSION_FILE#$REPO_ROOT/}"
+    codex -C "$REPO_ROOT" resume --last
+}
+
+close_session() {
+    local requested="${1:-}" session_file session_file_rel session_id session_seq
+    local ended temporary
+
+    session_file="$(resolve_session_file "$requested")"
+    session_file_rel="${session_file#$REPO_ROOT/}"
+    session_id="$(session_id_from_file "$session_file")" ||
+        die "cannot derive Session ID from ${session_file##*/}"
+    session_seq="${session_id##*-}"
+
+    grep -Fqx -- '- Status: active' "$session_file" ||
+        die "Session is not active: $session_file_rel"
+
+    require_section_content "$session_file" 'Evidence'
+    require_section_content "$session_file" 'Decisions'
+    require_section_content "$session_file" 'Verification'
+    require_section_content "$session_file" 'Unresolved'
+    require_section_content "$session_file" 'Next Session'
+
+    git var GIT_AUTHOR_IDENT >/dev/null 2>&1 ||
+        die "Git author identity is not configured"
+    git var GIT_COMMITTER_IDENT >/dev/null 2>&1 ||
+        die "Git committer identity is not configured"
+
+    ended="$(date --iso-8601=seconds)"
+    temporary="$(mktemp "$SESSION_DIR/.close.XXXXXX")"
+    trap 'rm -f -- "${temporary:-}"' RETURN
+
+    awk -v ended="$ended" '
+        $0 == "- Status: active" {
+            print "- Status: closed"
+            print "- Ended: " ended
+            next
+        }
+        { print }
+    ' "$session_file" >"$temporary"
+    chmod --reference="$session_file" "$temporary"
+    mv -- "$temporary" "$session_file"
+    temporary=''
+
+    git add -- "$session_file_rel"
+    if ! git commit --only -m "docs($PROBLEM_PREFIX): record session $session_seq" -- "$session_file_rel"; then
+        sed -i \
+            -e 's/^- Status: closed$/- Status: active/' \
+            -e '/^- Ended: /d' \
+            "$session_file"
+        git reset --quiet -- "$session_file_rel" || true
+        die "Git commit failed; Session was restored to active"
+    fi
+
+    printf 'Closed and committed %s\n' "$session_id"
+}
+
+main() {
+    local command="${1:-}"
+    [[ -n "$command" ]] || {
+        usage
+        exit 2
+    }
+    shift
+
+    init_context
+
+    case "$command" in
+        start)
+            (($# == 1)) || die "usage: $PROGRAM_NAME start <topic>"
+            start_session "$1"
+            ;;
+        resume)
+            (($# == 0)) || die "usage: $PROGRAM_NAME resume"
+            resume_session
+            ;;
+        close)
+            (($# == 1)) || die "usage: $PROGRAM_NAME close <session-file>"
+            close_session "$1"
+            ;;
+        -h|--help|help)
+            usage
+            ;;
+        *)
+            usage >&2
+            die "unknown command: $command"
+            ;;
+    esac
+}
+
+main "$@"

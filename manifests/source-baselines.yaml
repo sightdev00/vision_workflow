@@ -1,0 +1,236 @@
+schema_version: 1
+problem: P-001
+
+# 本文件只描述旧代码的来源、Git 基线、当前职责和迁移策略。
+# 新仓库中的目标目录由后续代码审计和迁移设计决定，不在此处提前指定。
+
+repositories:
+  rockchip-rv1126b:
+    local_path: "/mnt/231/Code/repoCode/guochuang/projectcollection/01-Projects/vision_platform/algo-runtime/rv1126b"
+    branch: "master"
+    commit: "1a2da689983ca73a08d8f98fe6f0690ed1cdc619"
+    access: "read-only"
+    aliases:
+      - "rv1126bp"
+    status: "pending-validation"
+    notes:
+      - "现有路径使用 rv1126b，部分历史命名使用 rv1126bp；需在基线审计时确认正式平台名称。"
+
+  hisilicon-hi3519dv500:
+    local_path: "/mnt/231/Code/repoCode/guochuang/projectcollection/01-Projects/vision_platform/algo-runtime/Hi3519DV500"
+    branch: "master"
+    commit: "783c65dd9e68c21afc4d6e799bea43696e920999"
+    access: "read-only"
+    status: "pending-validation"
+
+sources:
+  - name: "rockchip-dms"
+    repository: "rockchip-rv1126b"
+    path: "bsd_dsm_core/src/dsm"
+    category: "business-runtime"
+    capability: "dms"
+    platform: "rockchip-rv1126b"
+    role: "Rockchip RV1126B现有DMS业务实现"
+    import_policy: "read-only-reference"
+    status: "pending-validation"
+    notes:
+      - "现有目录使用 dsm 命名，新仓库中的正式模块名需在迁移设计中统一。"
+
+  - name: "hisilicon-dms"
+    repository: "hisilicon-hi3519dv500"
+    path: "algo/dsm/src"
+    category: "business-runtime"
+    capability: "dms"
+    platform: "hisilicon-hi3519dv500"
+    role: "HiSilicon HI3519DV500现有DMS业务实现"
+    import_policy: "read-only-reference"
+    status: "pending-validation"
+    notes:
+      - "现有目录使用 dsm 命名，新仓库中的正式模块名需在迁移设计中统一。"
+
+  - name: "rockchip-bsd"
+    repository: "rockchip-rv1126b"
+    path: "bsd_dsm_core/src/bsd"
+    category: "business-runtime"
+    capability: "bsd"
+    platform: "rockchip-rv1126b"
+    role: "Rockchip RV1126B现有BSD业务实现"
+    import_policy: "read-only-reference"
+    status: "pending-validation"
+    notes:
+      - "现有目录使用 bsd 命名，新仓库中的正式模块名需在迁移设计中统一。"
+
+  - name: "hisilicon-bsd"
+    repository: "hisilicon-hi3519dv500"
+    path: "algo/bsd_hh/src"
+    category: "business-runtime"
+    capability: "bsd"
+    platform: "hisilicon-hi3519dv500"
+    role: "HiSilicon HI3519DV500现有BSD业务实现"
+    import_policy: "read-only-reference"
+    status: "pending-validation"
+    notes:
+      - "现有目录使用 bsd 命名，新仓库中的正式模块名需在迁移设计中统一。"
+
+  - name: "hisilicon-inference-runtime"
+    repository: "hisilicon-hi3519dv500"
+    path: "base/common/infer_core_lib"
+    category: "base-library"
+    capability: "inference"
+    platform: "hisilicon-hi3519dv500"
+    role: "HiSilicon现有推理基础库"
+    import_policy: "selective-migration"
+    status: "pending-validation"
+
+  - name: "hisilicon-object-detection"
+    repository: "hisilicon-hi3519dv500"
+    path: "base/common/object_det"
+    category: "base-library"
+    capability: "object-detection"
+    platform: "hisilicon-hi3519dv500"
+    role: "HiSilicon现有目标检测基础库"
+    import_policy: "selective-migration"
+    status: "pending-validation"
+
+  - name: "hisilicon-blur-detection"
+    repository: "hisilicon-hi3519dv500"
+    path: "base/common/blur_det"
+    category: "base-library"
+    capability: "blur-detection"
+    platform: "hisilicon-hi3519dv500"
+    role: "HiSilicon现有模糊检测基础库"
+    import_policy: "selective-migration"
+    status: "pending-validation"
+
+  - name: "hisilicon-mem-encryption"
+    repository: "hisilicon-hi3519dv500"
+    path: "base/common/mem_encryption"
+    category: "base-library"
+    capability: "memory-encryption"
+    platform: "hisilicon-hi3519dv500"
+    role: "HiSilicon现有内存加密基础库"
+    import_policy: "selective-migration"
+    status: "pending-validation"
+
+  - name: "hisilicon-preprocessing"
+    repository: "hisilicon-hi3519dv500"
+    path: "base/common/rga_lib"
+    category: "base-library"
+    capability: "preprocessing"
+    platform: "hisilicon-hi3519dv500"
+    role: "HiSilicon代码树中的现有前处理相关库"
+    import_policy: "selective-migration"
+    status: "pending-validation"
+    notes:
+      - "初步判断HiSilicon主要使用AIPP完成前处理。"
+      - "该库是否被DMS实际调用、是否进入P-001迁移范围，尚需通过调用链和构建依赖验证。"
+
+  - name: "hisilicon-spdlog"
+    repository: "hisilicon-hi3519dv500"
+    path: "base/common/spdlog"
+    category: "third-party"
+    capability: "logging"
+    platform: "hisilicon-hi3519dv500"
+    role: "HiSilicon代码树中现有的spdlog第三方日志依赖"
+    import_policy: "external-dependency"
+    status: "pending-validation"
+    notes:
+      - "不默认复制两套spdlog源码；后续需确定统一版本、依赖方式及是否增加自有日志接口封装。"
+
+  - name: "rockchip-inference-runtime"
+    repository: "rockchip-rv1126b"
+    path: "common_core/inference"
+    category: "base-library"
+    capability: "inference"
+    platform: "rockchip-rv1126b"
+    role: "Rockchip现有推理基础库"
+    import_policy: "selective-migration"
+    status: "pending-validation"
+
+  - name: "rockchip-object-detection"
+    repository: "rockchip-rv1126b"
+    path: "common_core/object_det"
+    category: "base-library"
+    capability: "object-detection"
+    platform: "rockchip-rv1126b"
+    role: "Rockchip现有目标检测基础库"
+    import_policy: "selective-migration"
+    status: "pending-validation"
+
+  - name: "rockchip-blur-detection"
+    repository: "rockchip-rv1126b"
+    path: "common_core/blur_det"
+    category: "base-library"
+    capability: "blur-detection"
+    platform: "rockchip-rv1126b"
+    role: "Rockchip现有模糊检测基础库"
+    import_policy: "selective-migration"
+    status: "pending-validation"
+
+  - name: "rockchip-keypoint-detection"
+    repository: "rockchip-rv1126b"
+    path: "common_core/keypoint"
+    category: "base-library"
+    capability: "keypoint-detection"
+    platform: "rockchip-rv1126b"
+    role: "Rockchip现有关键点检测基础库"
+    import_policy: "selective-migration"
+    status: "pending-validation"
+    notes:
+      - "当前Manifest中没有对应的HiSilicon关键点库条目，需确认是平台能力差异、代码缺失还是未纳入基线。"
+
+  - name: "rockchip-mem-encryption"
+    repository: "rockchip-rv1126b"
+    path: "common_core/mem_encryption"
+    category: "base-library"
+    capability: "memory-encryption"
+    platform: "rockchip-rv1126b"
+    role: "Rockchip现有内存加密基础库"
+    import_policy: "selective-migration"
+    status: "pending-validation"
+
+  - name: "rockchip-preprocessing"
+    repository: "rockchip-rv1126b"
+    path: "common_core/rga_lib"
+    category: "base-library"
+    capability: "preprocessing"
+    platform: "rockchip-rv1126b"
+    role: "Rockchip现有前处理基础库"
+    import_policy: "selective-migration"
+    status: "pending-validation"
+    notes:
+      - "现有Rockchip实现主要通过该库完成图像前处理；具体调用范围需通过调用链和构建依赖验证。"
+
+  - name: "rockchip-spdlog"
+    repository: "rockchip-rv1126b"
+    path: "common_core/spdlog"
+    category: "third-party"
+    capability: "logging"
+    platform: "rockchip-rv1126b"
+    role: "Rockchip代码树中现有的spdlog第三方日志依赖"
+    import_policy: "external-dependency"
+    status: "pending-validation"
+    notes:
+      - "不默认复制两套spdlog源码；后续需确定统一版本、依赖方式及是否增加自有日志接口封装。"
+
+validation:
+  repository_checks:
+    - "local_path必须解析为Git仓库根目录。"
+    - "commit必须存在且为commit对象。"
+    - "branch必须存在，并确认是否包含指定commit。"
+
+  source_checks:
+    - "path必须存在于repository指定的commit中。"
+    - "role必须由源码、构建文件或调用关系支持。"
+    - "status从pending-validation变更前必须记录验证证据。"
+    - "selective-migration条目必须先完成职责、依赖、平台耦合和测试能力审计。"
+    - "external-dependency条目必须明确版本、获取方式、许可证和封装策略。"
+
+migration_rules:
+  - "旧仓库默认只读，不直接修改。"
+  - "本Manifest不直接决定新仓库的目标目录。"
+  - "先生成组件职责与依赖审计，再生成迁移映射。"
+  - "迁移映射经人工确认后，Agent才可创建目标目录或迁移代码。"
+  - "每项迁移必须记录来源repository、commit和path。"
+  - "平台专用实现不得直接成为公共接口。"
+  - "第三方依赖不得按自有基础库方式直接复制和维护。"
