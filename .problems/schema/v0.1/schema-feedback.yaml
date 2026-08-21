@@ -1,0 +1,22 @@
+# Schema Feedback Schema v0.1
+
+id: SFXXX
+
+source_problem: P-XXX
+
+type:
+  - missing_field
+  - invalid_abstraction
+  - workflow_gap
+
+issue: ""
+
+impact:
+  low
+
+proposal: ""
+
+status:
+  - proposed
+  - accepted
+  - rejected

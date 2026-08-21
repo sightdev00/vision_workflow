@@ -1,0 +1,23 @@
+# Hypothesis Schema v0.1
+
+id: HXXX
+
+statement: ""
+
+type: architecture
+
+confidence:
+  value: 0.0
+
+status:
+  - proposed
+  - testing
+  - supported
+  - rejected
+  - superseded
+
+supports: []
+contradicts: []
+depends_on: []
+
+created_by: human

@@ -1,0 +1,19 @@
+id: D000
+
+question: >
+  Should implementation start immediately?
+
+alternatives:
+  - option: direct_refactoring
+    rejected_reason: >
+      Insufficient baseline evidence.
+
+  - option: establish_baseline_first
+
+selected: establish_baseline_first
+
+owner: human
+
+reasoning: >
+  Current source baseline, dependencies and runtime boundaries
+  must be verified before architectural changes.

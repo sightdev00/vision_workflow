@@ -1,0 +1,36 @@
+id: P-001-vision-runtime-code-unification
+
+title: Unified Embedded Vision Runtime Architecture
+
+domain:
+  - embedded-ai
+  - computer-vision
+  - deployment
+
+problem_type: architecture_refactoring
+
+objective:
+  statement: >
+    Build a unified runtime architecture supporting RV1126B and HiSilicon DMS systems.
+
+motivation:
+  engineering:
+    - reduce duplicated platform-dependent code
+    - improve maintainability
+    - support future platform extension
+
+success_criteria:
+  architecture:
+    - algorithm layer independent from platform SDK
+    - runtime backend replaceable
+  engineering:
+    - traceable migration
+    - reproducible validation
+
+status: active
+
+knowledge_sources:
+  existing:
+    - README.md
+    - SESSION-PLAN.md
+    - WORKFLOW.json

@@ -1,0 +1,22 @@
+context:
+  existing_system:
+    platforms:
+      - RV1126B
+      - HiSilicon
+    runtimes:
+      - RKNN
+      - HiSilicon OM
+
+  current_problem:
+    observations:
+      - duplicated runtime implementations
+      - platform SDK leakage
+      - difficult cross-platform validation
+
+  constraints:
+    hardware:
+      - embedded NPU
+      - realtime requirement
+    compatibility:
+      - existing deployment flow
+      - existing platform behavior

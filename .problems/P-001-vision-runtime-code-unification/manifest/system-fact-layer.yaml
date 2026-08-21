@@ -1,0 +1,22 @@
+# System Fact Layer
+# Ground truth from repository structure, manifests and fixed baselines.
+
+system_fact_layer:
+  purpose: "Describe what exists, not why it exists."
+
+  platforms:
+    - name: RV1126B
+      runtime: RKNN
+    - name: HiSilicon
+      runtime: OM
+
+  components:
+    - runtime
+    - preprocess
+    - inference
+    - postprocess
+    - algorithm
+
+  fact_rules:
+    - "Facts require repository or artifact evidence."
+    - "Historical explanation belongs to docs, not manifest."

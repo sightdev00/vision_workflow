@@ -1,0 +1,15 @@
+id: E000
+
+type: repository_analysis
+
+source:
+  session: S001
+
+observation: >
+  Existing implementation contains platform-specific runtime logic
+  mixed with algorithm related code.
+
+supports:
+  - H001
+
+confidence: 0.8

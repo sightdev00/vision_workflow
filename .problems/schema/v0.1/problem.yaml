@@ -1,0 +1,30 @@
+# Problem Epistemic State v0.1
+
+id: P-XXX
+
+title: ""
+
+domain: []
+
+problem_type: ""
+
+owner:
+  type: human
+
+objective:
+  statement: ""
+
+motivation:
+  engineering: []
+  business: []
+
+success_criteria:
+  architecture: []
+  engineering: []
+  performance: []
+
+status: active
+
+knowledge_sources:
+  docs: []
+  manifests: []

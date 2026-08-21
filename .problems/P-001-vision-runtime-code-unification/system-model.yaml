@@ -1,0 +1,30 @@
+system_model:
+  current:
+    layers:
+      application:
+        - DMS logic
+      algorithm:
+        - detection
+        - classification
+        - postprocess
+      platform:
+        - RKNN API
+        - HiSilicon SDK
+
+    dependency:
+      algorithm:
+        depends_on:
+          - platform_sdk
+
+  target:
+    layers:
+      application:
+        - DMS
+      algorithm:
+        - common algorithm API
+      runtime:
+        - runtime interface
+        - backend adapter
+      platform:
+        - RV1126B backend
+        - HiSilicon backend
