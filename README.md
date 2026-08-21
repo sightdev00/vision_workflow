@@ -201,6 +201,53 @@ git log --oneline -5
 git push
 ```
 
+### GitLab与GitHub双向同步
+
+仓库使用`.git-sync-remotes`保存两个托管平台的标准远端别名和地址：
+
+```text
+gitlab → 公司GitLab
+github → GitHub
+```
+
+首次克隆后执行：
+
+```bash
+tools/git-sync-remotes setup
+```
+
+查看当前分支在本地、GitLab和GitHub的提交状态：
+
+```bash
+tools/git-sync-remotes status
+```
+
+安全同步当前分支：
+
+```bash
+tools/git-sync-remotes sync
+```
+
+也可以指定分支或先预演：
+
+```bash
+tools/git-sync-remotes status problem/P-001-vision-runtime-code-unification
+tools/git-sync-remotes sync problem/P-001-vision-runtime-code-unification --dry-run
+```
+
+同步命令每次重新读取两个远端，并选择能够同时包含本地、GitLab和GitHub现有提交的最新候选。它只执行普通快进推送，不会切换分支、修改工作区、自动合并、变基或强制推送。
+
+如果两端已经分叉，且不存在一个提交同时包含所有分支头，命令会停止。此时必须由人明确选择合并或变基方式，解决后再次同步。
+
+推荐使用方式：
+
+```text
+GitHub/Codex修改并提交 → tools/git-sync-remotes sync → GitLab快进
+本地/GitLab修改并提交 → tools/git-sync-remotes sync → GitHub快进
+```
+
+未提交文件不会被同步。身份认证继续使用本机SSH配置，不在仓库中保存令牌或私钥。
+
 ### 查看当前Session
 
 ```bash

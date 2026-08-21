@@ -1,0 +1,308 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly PROGRAM_NAME="${0##*/}"
+
+die() {
+    printf '%s: %s\n' "$PROGRAM_NAME" "$*" >&2
+    exit 1
+}
+
+warn() {
+    printf '%s: warning: %s\n' "$PROGRAM_NAME" "$*" >&2
+}
+
+usage() {
+    cat <<'EOF'
+Usage:
+  tools/git-sync-remotes setup
+  tools/git-sync-remotes status [branch]
+  tools/git-sync-remotes sync [branch] [--dry-run]
+
+Commands:
+  setup   Add the configured gitlab and github remote aliases when absent.
+  status  Fetch both remotes and report their branch tips and sync candidate.
+  sync    Fast-forward both remotes to the newest commit containing all known tips.
+
+Safety:
+  - Never force-pushes.
+  - Stops when GitLab, GitHub, and the local branch have diverged without a
+    single commit containing every tip.
+  - Does not merge, rebase, switch branches, or modify the working tree.
+
+Configuration:
+  .git-sync-remotes contains one "remote-name URL" pair per line.
+  Override its location with GIT_SYNC_CONFIG.
+EOF
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+remote_exists() {
+    git remote get-url "$1" >/dev/null 2>&1
+}
+
+load_config() {
+    [[ -f "$CONFIG_FILE" ]] || die "configuration not found: $CONFIG_FILE"
+
+    local name url extra
+    while read -r name url extra; do
+        [[ -z "${name:-}" || "$name" == \#* ]] && continue
+        [[ -n "${url:-}" && -z "${extra:-}" ]] ||
+            die "invalid configuration line in $CONFIG_FILE: $name ${url:-} ${extra:-}"
+        [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] ||
+            die "invalid remote alias in $CONFIG_FILE: $name"
+
+        case "$name" in
+            gitlab)
+                GITLAB_REMOTE="$name"
+                GITLAB_URL="$url"
+                ;;
+            github)
+                GITHUB_REMOTE="$name"
+                GITHUB_URL="$url"
+                ;;
+            *) die "unsupported remote alias in $CONFIG_FILE: $name" ;;
+        esac
+    done <"$CONFIG_FILE"
+
+    [[ -n "${GITLAB_REMOTE:-}" && -n "${GITHUB_REMOTE:-}" ]] ||
+        die "configuration must define gitlab and github"
+}
+
+ensure_remote() {
+    local name="$1" expected_url="$2" actual_url
+    if remote_exists "$name"; then
+        actual_url="$(git remote get-url "$name")"
+        [[ "$actual_url" == "$expected_url" ]] ||
+            die "remote $name points to $actual_url; expected $expected_url"
+        return
+    fi
+
+    git remote add "$name" "$expected_url"
+    printf 'Added remote %s -> %s\n' "$name" "$expected_url"
+}
+
+require_configured_remotes() {
+    local name expected_url actual_url
+    for name in "$GITLAB_REMOTE" "$GITHUB_REMOTE"; do
+        remote_exists "$name" ||
+            die "remote $name is missing; run: tools/git-sync-remotes setup"
+        case "$name" in
+            "$GITLAB_REMOTE") expected_url="$GITLAB_URL" ;;
+            "$GITHUB_REMOTE") expected_url="$GITHUB_URL" ;;
+        esac
+        actual_url="$(git remote get-url "$name")"
+        [[ "$actual_url" == "$expected_url" ]] ||
+            die "remote $name points to $actual_url; expected $expected_url"
+    done
+}
+
+resolve_branch() {
+    if [[ -z "$BRANCH" ]]; then
+        BRANCH="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" ||
+            die "detached HEAD requires an explicit branch"
+    fi
+    [[ "$BRANCH" != -* ]] || die "invalid branch: $BRANCH"
+    git check-ref-format --branch "$BRANCH" >/dev/null 2>&1 ||
+        die "invalid branch: $BRANCH"
+}
+
+fetch_remote_branch() {
+    local remote="$1" output remote_ref
+    remote_ref="refs/remotes/$remote/$BRANCH"
+
+    if ! output="$(git ls-remote --heads "$remote" "refs/heads/$BRANCH")"; then
+        die "cannot read $remote branch $BRANCH"
+    fi
+
+    if [[ -z "$output" ]]; then
+        git update-ref -d "$remote_ref" 2>/dev/null || true
+        return
+    fi
+
+    git fetch --no-tags "$remote" "+refs/heads/$BRANCH:$remote_ref"
+}
+
+ref_exists() {
+    git show-ref --verify --quiet "$1"
+}
+
+commit_of() {
+    git rev-parse "$1^{commit}"
+}
+
+short_commit() {
+    git rev-parse --short=12 "$1^{commit}"
+}
+
+is_ancestor() {
+    git merge-base --is-ancestor "$1" "$2"
+}
+
+collect_refs() {
+    LOCAL_REF="refs/heads/$BRANCH"
+    GITLAB_REF="refs/remotes/$GITLAB_REMOTE/$BRANCH"
+    GITHUB_REF="refs/remotes/$GITHUB_REMOTE/$BRANCH"
+    KNOWN_REFS=()
+    CANDIDATE_REFS=()
+
+    if ref_exists "$LOCAL_REF"; then
+        KNOWN_REFS+=("$LOCAL_REF")
+        CANDIDATE_REFS+=("$LOCAL_REF")
+    fi
+    if ref_exists "$GITLAB_REF"; then
+        KNOWN_REFS+=("$GITLAB_REF")
+        CANDIDATE_REFS+=("$GITLAB_REF")
+    fi
+    if ref_exists "$GITHUB_REF"; then
+        KNOWN_REFS+=("$GITHUB_REF")
+        CANDIDATE_REFS+=("$GITHUB_REF")
+    fi
+
+    ((${#KNOWN_REFS[@]} > 0)) || die "branch $BRANCH does not exist locally or remotely"
+}
+
+select_candidate() {
+    local candidate known candidate_commit known_commit valid
+    CANDIDATE_REF=''
+
+    for candidate in "${CANDIDATE_REFS[@]}"; do
+        candidate_commit="$(commit_of "$candidate")"
+        valid=1
+        for known in "${KNOWN_REFS[@]}"; do
+            known_commit="$(commit_of "$known")"
+            if ! is_ancestor "$known_commit" "$candidate_commit"; then
+                valid=0
+                break
+            fi
+        done
+        if ((valid)); then
+            CANDIDATE_REF="$candidate"
+            CANDIDATE_COMMIT="$candidate_commit"
+            return
+        fi
+    done
+
+    die "branch $BRANCH has diverged; merge or rebase explicitly, then run sync again"
+}
+
+print_ref() {
+    local label="$1" ref="$2"
+    if ref_exists "$ref"; then
+        printf '%-8s %s\n' "$label" "$(short_commit "$ref")"
+    else
+        printf '%-8s %s\n' "$label" missing
+    fi
+}
+
+print_status() {
+    printf 'Branch: %s\n' "$BRANCH"
+    print_ref local "$LOCAL_REF"
+    print_ref gitlab "$GITLAB_REF"
+    print_ref github "$GITHUB_REF"
+    printf '%-8s %s (%s)\n' candidate "$(short_commit "$CANDIDATE_REF")" "$CANDIDATE_REF"
+
+    if ref_exists "$LOCAL_REF" && [[ "$(commit_of "$LOCAL_REF")" != "$CANDIDATE_COMMIT" ]]; then
+        warn "local branch is behind the sync candidate; this command will not update the working tree"
+    fi
+    if [[ -n "$(git status --porcelain)" ]]; then
+        warn "working tree has uncommitted changes; only committed history can be synchronized"
+    fi
+}
+
+push_candidate() {
+    local remote="$1" remote_ref="$2" remote_commit='' push_args=()
+    if ref_exists "$remote_ref"; then
+        remote_commit="$(commit_of "$remote_ref")"
+    fi
+    if [[ "$remote_commit" == "$CANDIDATE_COMMIT" ]]; then
+        printf '%s already at %s\n' "$remote" "$(short_commit "$CANDIDATE_REF")"
+        return
+    fi
+
+    ((DRY_RUN)) && push_args+=(--dry-run)
+    git push "${push_args[@]}" "$remote" "$CANDIDATE_REF:refs/heads/$BRANCH"
+}
+
+sync_branch() {
+    fetch_remote_branch "$GITLAB_REMOTE"
+    fetch_remote_branch "$GITHUB_REMOTE"
+    collect_refs
+    select_candidate
+    print_status
+
+    push_candidate "$GITLAB_REMOTE" "$GITLAB_REF"
+    push_candidate "$GITHUB_REMOTE" "$GITHUB_REF"
+}
+
+status_branch() {
+    fetch_remote_branch "$GITLAB_REMOTE"
+    fetch_remote_branch "$GITHUB_REMOTE"
+    collect_refs
+    select_candidate
+    print_status
+}
+
+main() {
+    require_command git
+    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" ||
+        die "not inside a Git worktree"
+    cd "$REPO_ROOT"
+    CONFIG_FILE="${GIT_SYNC_CONFIG:-$REPO_ROOT/.git-sync-remotes}"
+    load_config
+
+    ACTION="${1:-}"
+    [[ -n "$ACTION" ]] || {
+        usage
+        exit 2
+    }
+    shift
+
+    BRANCH=''
+    DRY_RUN=0
+    while (($#)); do
+        case "$1" in
+            --dry-run) DRY_RUN=1 ;;
+            -h|--help)
+                usage
+                return
+                ;;
+            -*) die "unknown option: $1" ;;
+            *)
+                [[ -z "$BRANCH" ]] || die "multiple branches specified"
+                BRANCH="$1"
+                ;;
+        esac
+        shift
+    done
+
+    case "$ACTION" in
+        setup)
+            ((DRY_RUN == 0)) || die "--dry-run is only valid with sync"
+            [[ -z "$BRANCH" ]] || die "setup does not accept a branch"
+            ensure_remote "$GITLAB_REMOTE" "$GITLAB_URL"
+            ensure_remote "$GITHUB_REMOTE" "$GITHUB_URL"
+            ;;
+        status)
+            ((DRY_RUN == 0)) || die "--dry-run is only valid with sync"
+            require_configured_remotes
+            resolve_branch
+            status_branch
+            ;;
+        sync)
+            require_configured_remotes
+            resolve_branch
+            sync_branch
+            ;;
+        -h|--help) usage ;;
+        *)
+            usage >&2
+            die "unknown command: $ACTION"
+            ;;
+    esac
+}
+
+main "$@"

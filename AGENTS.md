@@ -503,6 +503,16 @@ git diff --stat
 
 Commit边界按照可独立审查和回滚的变化划分，不按照Session机械划分。
 
+GitLab与GitHub之间同步已提交历史时使用：
+
+```bash
+tools/git-sync-remotes setup
+tools/git-sync-remotes status
+tools/git-sync-remotes sync
+```
+
+同步只能使用普通快进推送。远端分叉时必须停止，由人工明确合并或变基方案；不得用`--force`、`--force-with-lease`或删除远端分支消除差异。同步不包含未提交文件，也不改变Session关闭和提交规则。
+
 建议Commit类型：
 
 ```text
