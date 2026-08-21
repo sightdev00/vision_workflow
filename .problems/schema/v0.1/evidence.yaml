@@ -1,0 +1,24 @@
+# Evidence Schema v0.1
+
+id: EXXX
+
+type:
+  - code_analysis
+  - experiment
+  - benchmark
+  - manifest_analysis
+  - documentation_analysis
+  - production_issue
+
+source:
+  session: ""
+  commit: ""
+
+observation: ""
+
+supports: []
+contradicts: []
+
+artifacts: []
+
+confidence: 0.0
