@@ -1,0 +1,15 @@
+id: SF000
+
+problem: P-001-vision-runtime-code-unification
+
+issue: >
+  Current schema cannot fully express historical architecture evolution.
+
+impact: medium
+
+proposal:
+  add:
+    - history
+    - evolution_log
+
+status: proposed
