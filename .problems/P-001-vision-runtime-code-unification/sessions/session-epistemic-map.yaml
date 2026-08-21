@@ -1,31 +1,55 @@
-# Session Epistemic Mapping
+# Session Epistemic Mapping v0.1
 
 sessions:
   - id: S001
+    artifact: S001-epistemic-state.yaml
     pattern:
+      - Human Intent
+      - Context / State
       - Hypothesis
       - Action
       - Evidence
+      - Interpretation
+      - Decision
       - State Transition
     purpose: problem framing and governance
+    status: migrated
 
   - id: S002
     pattern:
+      - Human Intent
+      - Context / State
       - Hypothesis
       - Action
       - Evidence
+      - Interpretation
+      - Decision
       - State Transition
     purpose: source baseline validation
+    status: pending-migration
 
 mapping_rules:
+  human_intent:
+    description: "Why this session exists and what human wants to resolve"
+  context_state:
+    description: "Initial epistemic state before execution"
   hypothesis:
-    description: "What we believe before execution"
+    description: "Belief or assumption to validate"
   action:
-    description: "What the agent or human performs"
+    description: "Agent or human execution step"
   evidence:
-    description: "Observed result produced by action"
+    description: "Observable result produced by action"
+  interpretation:
+    description: "Meaning assigned to evidence"
+  decision:
+    description: "Human-controlled commitment based on evidence"
   state_transition:
-    description: "How confidence, understanding or decisions change"
+    description: "Change in confidence, knowledge or problem state"
+
+migration_status:
+  S001: completed
+  S002: planned
+  S003-S009: waiting_for_original_artifact_review
 
 note:
-  "S003-S009 will be migrated using the same structure after reviewing original session artifacts."
+  "Sessions are not execution logs. They are epistemic state transitions."
