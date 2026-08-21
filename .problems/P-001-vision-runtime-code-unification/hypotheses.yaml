@@ -1,0 +1,25 @@
+hypotheses:
+  - id: H001
+    type: architecture
+    statement: >
+      Platform coupling mainly exists below runtime layer.
+    confidence: 0.7
+    status: testing
+
+  - id: H002
+    type: architecture
+    statement: >
+      A unified runtime abstraction can support multiple platforms.
+    confidence: 0.6
+    status: testing
+    depends_on:
+      - H001
+
+  - id: H003
+    type: performance
+    statement: >
+      Runtime abstraction will not introduce unacceptable latency.
+    confidence: 0.5
+    status: proposed
+    depends_on:
+      - H002
