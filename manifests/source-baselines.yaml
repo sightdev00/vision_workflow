@@ -167,18 +167,6 @@ sources:
     import_policy: "selective-migration"
     status: "pending-validation"
 
-  - name: "rockchip-keypoint-detection"
-    repository: "rockchip-rv1126b"
-    path: "common_core/keypoint"
-    category: "base-library"
-    capability: "keypoint-detection"
-    platform: "rockchip-rv1126b"
-    role: "Rockchip现有关键点检测基础库"
-    import_policy: "selective-migration"
-    status: "pending-validation"
-    notes:
-      - "当前Manifest中没有对应的HiSilicon关键点库条目，需确认是平台能力差异、代码缺失还是未纳入基线。"
-
   - name: "rockchip-mem-encryption"
     repository: "rockchip-rv1126b"
     path: "common_core/mem_encryption"
@@ -191,7 +179,7 @@ sources:
 
   - name: "rockchip-preprocessing"
     repository: "rockchip-rv1126b"
-    path: "common_core/rga_lib"
+    path: "common_core/IPreproc"
     category: "base-library"
     capability: "preprocessing"
     platform: "rockchip-rv1126b"

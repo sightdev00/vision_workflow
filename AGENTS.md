@@ -41,10 +41,11 @@ P-001：统一Rockchip与HiSilicon的DMS代码，
 
 1. 根目录`README.md`；
 2. 当前Problem记录；
-3. `manifests/source-baselines.yaml`；
-4. 与当前任务直接相关的`docs/`文档；
-5. 目标模块的构建文件、接口和源码；
-6. 相关测试、日志和版本Manifest。
+3. 当前问题的`WORKFLOW.json`工作流实例；
+4. `manifests/source-baselines.yaml`；
+5. 与当前任务直接相关的`docs/`文档；
+6. 目标模块的构建文件、接口和源码；
+7. 相关测试、日志和版本Manifest。
 
 不要一次加载全部文档。只读取当前任务所需内容。
 
@@ -56,6 +57,7 @@ P-001：统一Rockchip与HiSilicon的DMS代码，
 | `AGENTS.md`                       | Agent操作边界       |
 | `manifests/source-baselines.yaml` | 旧代码来源和固定Git基线   |
 | Problem记录                         | 当前状态、证据、决策和下一步  |
+| `WORKFLOW.json`                    | 工作流节点、依赖、状态、门禁和执行尝试 |
 | `docs/`                           | 已确认并需要长期维护的设计知识 |
 | Git历史                             | 代码变化、审查和回滚依据    |
 | 测试结果                              | 外部验证证据          |
@@ -340,9 +342,24 @@ externalized：改为外部依赖
 
 ---
 
-## 12. Problem and Session Rules
+## 12. 文档写作规则
 
-Problem是长期工程目标，Session是一次有限工作上下文。
+所有`.md`文件遵守以下规则：
+
+* 除必须保留的技术标识外，标题、字段说明、列表项和正文句子都使用中文；
+* 不要出现标题为中文、内容大段切换为英文，或前半部分中文、后半部分英文的混杂写法；
+* 普通叙述中的英文词应翻译为中文，例如“Problem”写作“问题”，“Session”写作“会话”，“Commit”写作“提交”，“Manifest”写作“清单”；
+* 只有不可替换或替换后会损失精确性的技术标识可以保留英文，例如命令、路径、文件名、类型名、函数名、字段名、状态枚举、Git分支名、提交信息和外部原文；
+* 如果因工具或脚本兼容需要保留英文结构化字段名，例如`Objective`、`Evidence`、`Verification`，字段正文说明仍必须使用中文；
+* 修改既有Markdown文件时，应在当前修改范围内尽量统一语言风格，不要求一次性重写无关历史内容。
+
+---
+
+## 13. Problem and Session Rules
+
+问题是长期工程目标，工作流实例是问题的可执行控制结构，会话是某个工作流节点的一次有限执行尝试。
+
+工作流节点与会话不是一一对应关系。一个节点可以有多个会话尝试；会话关闭只表示该上下文已经封存，不表示节点、工作流或问题已经完成。节点状态、依赖、人工门禁和执行尝试以当前问题的`WORKFLOW.json`为准。
 
 Session不要求完成整个Problem，也不要求强行完成一个完整阶段；但必须保持局部连续：
 
@@ -363,7 +380,7 @@ Session不要求完成整个Problem，也不要求强行完成一个完整阶段
 * 当前成果已经足够由下一Session继续；
 * 需要人工确认才能跨越Commitment Gate。
 
-Session结束时至少记录：
+会话结束时至少记录当前工作流节点、执行尝试、父会话以及：
 
 ```text
 Objective
@@ -382,7 +399,7 @@ Problem记录只保存状态、结论和证据指针，不复制完整Session对
 
 ---
 
-## 13. Work Phases and Gates
+## 14. Work Phases and Gates
 
 当前工作按照以下状态推进：
 
@@ -450,7 +467,7 @@ INTAKE
 
 ---
 
-## 14. Git and Worktree Rules
+## 15. Git and Worktree Rules
 
 开始修改前执行：
 
@@ -502,7 +519,7 @@ test(...)
 
 ---
 
-## 15. Build and Test Rules
+## 16. Build and Test Rules
 
 当前仓库的构建和测试体系尚未完全建立。
 
@@ -533,7 +550,7 @@ Agent不得虚构构建命令、测试命令或通过结果。
 
 ---
 
-## 16. Verification Standard
+## 17. Verification Standard
 
 以下情况不能视为完成：
 
@@ -569,7 +586,7 @@ final judgment
 
 ---
 
-## 17. Release and Version Rules
+## 18. Release and Version Rules
 
 一个Git仓库不意味着所有组件共享同一个产物版本。
 
@@ -596,7 +613,7 @@ final judgment
 
 ---
 
-## 18. Stable Knowledge Placement
+## 19. Stable Knowledge Placement
 
 成果按照以下规则保存：
 
@@ -615,7 +632,7 @@ final judgment
 
 ---
 
-## 19. Required Final Report
+## 20. Required Final Report
 
 每次任务结束时，输出必须包含：
 
@@ -649,10 +666,19 @@ Next
 
 当通过 `tools/problem-session` 启动时：
 
-- 必须读取 `PROBLEM_ID`、`SESSION_ID` 和 `SESSION_FILE`
-- 开始工作前读取 `SESSION_FILE`
+- 必须读取 `PROBLEM_ID`、`SESSION_ID`、`SESSION_FILE`、`WORKFLOW_FILE` 和 `WORKFLOW_NODE`
+- 开始工作前读取 `WORKFLOW_FILE`、`SESSION_PLAN` 和 `SESSION_FILE`
+- 开始执行节点前运行或等价读取`tools/problem-session instructions "$WORKFLOW_NODE"`提供的输入、产物、约束、外部判定机制和人工门禁快照
+- 节点进入`ready`前必须在`WORKFLOW.json`声明非空制品契约，包括制品种类、路径来源、依赖、完成条件、影响关系和是否必需；不得用空目录或空文件代替契约
+- 智能体必须按`instructions`返回的实际制品路径读取和修改，不能根据固定文件名或聊天记忆猜测制品位置
+- 用户直接修改会话或其他制品后，继续工作前必须重新读取磁盘文件；聊天记忆和智能体摘要不是权威状态
+- `H-*`人工经验卡和`D-*`人工决策卡允许用户直接增删；人工确认复选框只能由用户勾选，智能体只能补证据、影响分析和建议
+- `review`只检查卡片结构，`verify`区分完整性、正确性和一致性，`reconcile`只提出协调建议，`retain`只提出稳定知识晋升计划；这些命令均不得自动接受节点或关闭会话
+- 使用`reconcile --artifact <id>`处理人工编辑时，必须同时检查该制品的前向影响和反向依据；制品依赖顺序不是只能向下修改的限制
+- `retain`只能把已验证且节点已接受的活动制品列为可晋升项；晋升目标仍需逐项人工批准，`close`不能代替`retain`
+- 只处理当前工作流节点允许的目标、输入、Oracle和人工门禁
 - 工作过程中持续更新 Evidence、Decisions、Changes 和 Verification
-- 不得因为任务完成、Codex 退出或上下文压缩而自动关闭 Session
+- 不得因为任务完成、Agent（Codex 或 Claude）退出或上下文压缩而自动关闭 Session
 - 只有用户明确表示“该 Session 可以结束了”时，才允许关闭
 - 关闭前必须补齐 Evidence、Decisions、Verification、Unresolved 和 Next Session
 - 关闭时必须执行：
@@ -662,7 +688,9 @@ Next
   ```
 
 - `close` 失败时必须报告原因，不得声称 Session 已结束
+- `close`只关闭会话记录，不得自动把工作流节点改为`accepted`
+- Agent只能提出工作流状态转换建议；要求人工门禁的转换必须引用人工决策记录
 - 不得绕过 `close` 手工提交 Session 文件
 - `close` 不得提交业务代码，也不得执行 `git push`
-- 每个 Session 开始时必须读取 `SESSION_PLAN` 和 `SESSION_FILE`，只处理当前 Session 的目标。
+- 每个会话开始时必须确认工作流节点、尝试序号和父会话关系；继续已关闭工作时使用`tools/problem-session continue --from`创建新尝试，不得重开历史会话。
 - 结束前必须更新 `SESSION-PLAN.md` 中的状态、实际产物和下一 Session；计划更新应在调用 `close` 前完成并提交。

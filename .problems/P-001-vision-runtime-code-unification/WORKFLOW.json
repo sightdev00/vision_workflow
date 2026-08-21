@@ -1,0 +1,595 @@
+{
+  "schema_version": "2.0",
+  "workflow_id": "P-001-W001",
+  "problem_id": "P-001-vision-runtime-code-unification",
+  "title": "统一Rockchip与HiSilicon的DMS运行时",
+  "pattern": {
+    "id": "evidence-driven-runtime-unification",
+    "version": "0.1.0"
+  },
+  "state": "active",
+  "current_nodes": [
+    "source-baseline-validation"
+  ],
+  "acceptance": {
+    "owner": "human",
+    "final_gate": "P-001-GATE-FINAL",
+    "criteria_source": "AGENTS.md#17-verification-standard"
+  },
+  "nodes": [
+    {
+      "id": "problem-frame",
+      "title": "问题框定与仓库治理",
+      "phase": "FRAME",
+      "status": "accepted",
+      "depends_on": [],
+      "required_capabilities": [
+        "problem-framing",
+        "repository-governance"
+      ],
+      "oracle": [
+        "repository-files",
+        "git-history"
+      ],
+      "human_gate": {
+        "required": true,
+        "gate_id": "P-001-GATE-FRAME",
+        "decision_record": ".problems/P-001-vision-runtime-code-unification/sessions/P-001-S001-problem-frame.md",
+        "required_decisions": []
+      },
+      "attempts": [
+        "P-001-S001"
+      ],
+      "artifact_contract": {
+        "required_before_ready": true,
+        "acceptance_requires_complete": true,
+        "legacy_accepted": true
+      },
+      "artifacts": []
+    },
+    {
+      "id": "source-baseline-validation",
+      "title": "旧源码基线验证",
+      "phase": "AUDIT",
+      "status": "active",
+      "depends_on": [
+        "problem-frame"
+      ],
+      "required_capabilities": [
+        "git-baseline-validation",
+        "source-provenance-audit"
+      ],
+      "oracle": [
+        "read-only-git-commands",
+        "manifest-path-validation"
+      ],
+      "human_gate": {
+        "required": true,
+        "gate_id": "P-001-GATE-BASELINE",
+        "decision_record": null,
+        "required_decisions": [
+          "U-01",
+          "U-02",
+          "U-03"
+        ]
+      },
+      "attempts": [
+        "P-001-S002"
+      ],
+      "inputs": [
+        "manifests/source-baselines.yaml中的仓库、分支、固定提交、路径、角色和导入策略",
+        "旧源码仓库在固定提交下的只读Git证据",
+        "当前会话中用户补充的源码来源经验和处置决定"
+      ],
+      "outputs": [
+        "逐源码条目的Confirmed、Inferred、Unknown或Rejected结论",
+        "无效路径、缺失来源和分支包含关系的实际命令及结果",
+        "经人工确认的清单处置边界和后续责任节点"
+      ],
+      "constraints": [
+        "旧源码仓库严格只读，不切换分支或工作树",
+        "不存在的提交或路径不得用相似目录替代",
+        "本节点不迁移代码、不设计接口、不创建目标源码目录",
+        "人工复选框只能由用户确认，智能体不得代勾"
+      ],
+      "retention_targets": [
+        "manifests/source-baselines.yaml",
+        ".problems/P-001-vision-runtime-code-unification/README.md",
+        "后续迁移来源清单或设计文档中的证据指针"
+      ],
+      "artifact_contract": {
+        "required_before_ready": true,
+        "acceptance_requires_complete": true
+      },
+      "artifacts": [
+        {
+          "id": "source-manifest",
+          "title": "源码基线清单",
+          "kind": "stable-input",
+          "lifecycle": "stable",
+          "path": "manifests/source-baselines.yaml",
+          "required": true,
+          "requires": [],
+          "completion": {
+            "type": "file-nonempty"
+          },
+          "impacts": [
+            "baseline-findings",
+            "baseline-evidence",
+            "baseline-decisions",
+            "baseline-verification"
+          ],
+          "rules": [
+            "任何仓库、提交或路径变化都必须重新验证所有下游基线结论"
+          ]
+        },
+        {
+          "id": "human-experience",
+          "title": "人工经验输入",
+          "kind": "human-experience",
+          "lifecycle": "active",
+          "path_source": "active-session",
+          "required": false,
+          "requires": [],
+          "completion": {
+            "type": "section-present",
+            "section": "人工经验输入"
+          },
+          "impacts": [
+            "baseline-findings",
+            "baseline-decisions"
+          ],
+          "rules": [
+            "经验先作为输入，不自动提升为工程事实"
+          ]
+        },
+        {
+          "id": "baseline-findings",
+          "title": "基线审计结论",
+          "kind": "analysis",
+          "lifecycle": "active",
+          "path_source": "active-session",
+          "required": true,
+          "requires": [
+            "source-manifest"
+          ],
+          "completion": {
+            "type": "section-nonempty",
+            "section": "发现"
+          },
+          "impacts": [
+            "baseline-decisions",
+            "baseline-verification",
+            "baseline-retention"
+          ],
+          "rules": [
+            "结论必须标记Confirmed、Inferred、Unknown或Rejected"
+          ]
+        },
+        {
+          "id": "baseline-evidence",
+          "title": "基线验证证据",
+          "kind": "evidence",
+          "lifecycle": "active",
+          "path_source": "active-session",
+          "required": true,
+          "requires": [
+            "source-manifest"
+          ],
+          "completion": {
+            "type": "section-nonempty",
+            "section": "证据"
+          },
+          "impacts": [
+            "baseline-findings",
+            "baseline-decisions",
+            "baseline-verification",
+            "baseline-retention"
+          ],
+          "rules": [
+            "必须包含实际命令、固定提交、路径和结果",
+            "外部证据不足时保持Unknown"
+          ]
+        },
+        {
+          "id": "baseline-decisions",
+          "title": "人工基线决定",
+          "kind": "human-decision",
+          "lifecycle": "active",
+          "path_source": "active-session",
+          "required": true,
+          "requires": [
+            "baseline-findings",
+            "baseline-evidence"
+          ],
+          "completion": {
+            "type": "cards-confirmed",
+            "card_ids": [
+              "U-01",
+              "U-02",
+              "U-03"
+            ]
+          },
+          "impacts": [
+            "baseline-verification",
+            "baseline-retention"
+          ],
+          "rules": [
+            "复选框只能由用户确认",
+            "决定不替代其引用的工程证据"
+          ]
+        },
+        {
+          "id": "baseline-verification",
+          "title": "节点验证报告",
+          "kind": "verification",
+          "lifecycle": "active",
+          "path_source": "active-session",
+          "required": true,
+          "requires": [
+            "baseline-findings",
+            "baseline-evidence",
+            "baseline-decisions"
+          ],
+          "completion": {
+            "type": "section-nonempty",
+            "section": "验证"
+          },
+          "impacts": [
+            "baseline-retention"
+          ],
+          "oracle": [
+            "read-only-git-commands",
+            "manifest-path-validation",
+            "human-evidence-sufficiency-judgment"
+          ],
+          "rules": [
+            "完整性、正确性和一致性必须分别报告",
+            "智能体自评不能单独满足正确性"
+          ]
+        },
+        {
+          "id": "baseline-retention",
+          "title": "基线稳定知识晋升",
+          "kind": "promotion",
+          "lifecycle": "promotion",
+          "path_source": "active-session",
+          "required": false,
+          "requires": [
+            "baseline-verification"
+          ],
+          "completion": {
+            "type": "node-accepted"
+          },
+          "targets": [
+            {
+              "path": "manifests/source-baselines.yaml",
+              "content": "经确认的源码来源和固定基线"
+            },
+            {
+              "path": ".problems/P-001-vision-runtime-code-unification/README.md",
+              "content": "节点状态、结论和证据指针"
+            },
+            {
+              "path": "docs/",
+              "content": "需要长期维护且已确认的迁移约束"
+            }
+          ],
+          "rules": [
+            "只晋升已验证且经人工接受的内容",
+            "retain只给出计划，不自动写入"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "document-evidence-review",
+      "title": "既有文档证据复核",
+      "phase": "AUDIT",
+      "status": "planned",
+      "depends_on": [
+        "source-baseline-validation"
+      ],
+      "required_capabilities": [
+        "evidence-classification",
+        "document-audit"
+      ],
+      "oracle": [
+        "fixed-source-baseline",
+        "document-evidence-links"
+      ],
+      "human_gate": {
+        "required": false,
+        "gate_id": null,
+        "decision_record": null,
+        "required_decisions": []
+      },
+      "attempts": [],
+      "artifact_contract": {
+        "required_before_ready": true,
+        "acceptance_requires_complete": true
+      },
+      "artifacts": []
+    },
+    {
+      "id": "build-runtime-artifact-audit",
+      "title": "构建、依赖与运行制品审计",
+      "phase": "AUDIT",
+      "status": "planned",
+      "depends_on": [
+        "source-baseline-validation"
+      ],
+      "required_capabilities": [
+        "build-entry-audit",
+        "runtime-artifact-inventory"
+      ],
+      "oracle": [
+        "build-files",
+        "dependency-manifests",
+        "device-artifact-hashes"
+      ],
+      "human_gate": {
+        "required": false,
+        "gate_id": null,
+        "decision_record": null,
+        "required_decisions": []
+      },
+      "attempts": [],
+      "artifact_contract": {
+        "required_before_ready": true,
+        "acceptance_requires_complete": true
+      },
+      "artifacts": []
+    },
+    {
+      "id": "runtime-call-chain-audit",
+      "title": "调用链与运行时行为审计",
+      "phase": "AUDIT",
+      "status": "planned",
+      "depends_on": [
+        "source-baseline-validation"
+      ],
+      "required_capabilities": [
+        "call-chain-analysis",
+        "runtime-lifecycle-audit"
+      ],
+      "oracle": [
+        "fixed-source-call-sites",
+        "runtime-logs"
+      ],
+      "human_gate": {
+        "required": false,
+        "gate_id": null,
+        "decision_record": null,
+        "required_decisions": []
+      },
+      "attempts": [],
+      "artifact_contract": {
+        "required_before_ready": true,
+        "acceptance_requires_complete": true
+      },
+      "artifacts": []
+    },
+    {
+      "id": "unification-scope-decision",
+      "title": "统一范围决策",
+      "phase": "DESIGN",
+      "status": "planned",
+      "depends_on": [
+        "document-evidence-review",
+        "build-runtime-artifact-audit",
+        "runtime-call-chain-audit"
+      ],
+      "required_capabilities": [
+        "migration-scope-analysis",
+        "counterevidence-review"
+      ],
+      "oracle": [
+        "audit-findings",
+        "migration-provenance"
+      ],
+      "human_gate": {
+        "required": true,
+        "gate_id": "P-001-GATE-SCOPE",
+        "decision_record": null,
+        "required_decisions": []
+      },
+      "attempts": [],
+      "artifact_contract": {
+        "required_before_ready": true,
+        "acceptance_requires_complete": true
+      },
+      "artifacts": []
+    },
+    {
+      "id": "architecture-and-interface-design",
+      "title": "目标架构、接口与生命周期设计",
+      "phase": "DESIGN",
+      "status": "planned",
+      "depends_on": [
+        "unification-scope-decision"
+      ],
+      "required_capabilities": [
+        "runtime-architecture-design",
+        "abi-and-lifecycle-design"
+      ],
+      "oracle": [
+        "design-review",
+        "compatibility-matrix"
+      ],
+      "human_gate": {
+        "required": true,
+        "gate_id": "P-001-GATE-COMMITMENT",
+        "decision_record": null,
+        "required_decisions": []
+      },
+      "attempts": [],
+      "artifact_contract": {
+        "required_before_ready": true,
+        "acceptance_requires_complete": true
+      },
+      "artifacts": []
+    },
+    {
+      "id": "migration-plan-and-acceptance",
+      "title": "迁移顺序、验收矩阵与回滚设计",
+      "phase": "COMMIT",
+      "status": "planned",
+      "depends_on": [
+        "architecture-and-interface-design"
+      ],
+      "required_capabilities": [
+        "migration-planning",
+        "acceptance-design",
+        "rollback-design"
+      ],
+      "oracle": [
+        "human-commitment-gate"
+      ],
+      "human_gate": {
+        "required": true,
+        "gate_id": "P-001-GATE-IMPLEMENT",
+        "decision_record": null,
+        "required_decisions": []
+      },
+      "attempts": [],
+      "artifact_contract": {
+        "required_before_ready": true,
+        "acceptance_requires_complete": true
+      },
+      "artifacts": []
+    },
+    {
+      "id": "implementation-and-platform-integration",
+      "title": "基础能力、DMS运行时与平台集成实现",
+      "phase": "IMPLEMENT",
+      "status": "planned",
+      "depends_on": [
+        "migration-plan-and-acceptance"
+      ],
+      "required_capabilities": [
+        "incremental-implementation",
+        "platform-adapter-integration"
+      ],
+      "oracle": [
+        "local-builds",
+        "unit-tests",
+        "platform-builds"
+      ],
+      "human_gate": {
+        "required": false,
+        "gate_id": null,
+        "decision_record": null,
+        "required_decisions": []
+      },
+      "attempts": [],
+      "artifact_contract": {
+        "required_before_ready": true,
+        "acceptance_requires_complete": true
+      },
+      "artifacts": []
+    },
+    {
+      "id": "cross-platform-verification",
+      "title": "跨平台外部验证",
+      "phase": "VERIFY",
+      "status": "planned",
+      "depends_on": [
+        "implementation-and-platform-integration"
+      ],
+      "required_capabilities": [
+        "cross-platform-parity-validation",
+        "performance-and-stability-validation"
+      ],
+      "oracle": [
+        "pc-baseline",
+        "rockchip-device",
+        "hisilicon-device",
+        "test-reports"
+      ],
+      "human_gate": {
+        "required": true,
+        "gate_id": "P-001-GATE-ACCEPTANCE",
+        "decision_record": null,
+        "required_decisions": []
+      },
+      "attempts": [],
+      "artifact_contract": {
+        "required_before_ready": true,
+        "acceptance_requires_complete": true
+      },
+      "artifacts": []
+    },
+    {
+      "id": "retain-and-close",
+      "title": "稳定知识留存与问题关闭",
+      "phase": "RETAIN",
+      "status": "planned",
+      "depends_on": [
+        "cross-platform-verification"
+      ],
+      "required_capabilities": [
+        "knowledge-retention",
+        "release-traceability"
+      ],
+      "oracle": [
+        "final-artifact-manifest",
+        "human-final-judgment"
+      ],
+      "human_gate": {
+        "required": true,
+        "gate_id": "P-001-GATE-FINAL",
+        "decision_record": null,
+        "required_decisions": []
+      },
+      "attempts": [],
+      "artifact_contract": {
+        "required_before_ready": true,
+        "acceptance_requires_complete": true
+      },
+      "artifacts": []
+    }
+  ],
+  "artifact_model": {
+    "version": "1.0",
+    "status_source": "derived-from-disk-and-contract",
+    "knowledge_layers": {
+      "stable": [
+        "README.md",
+        "AGENTS.md",
+        "docs/",
+        "manifests/",
+        "accepted workflow conclusions"
+      ],
+      "active": [
+        "problem record",
+        "WORKFLOW.json",
+        "active Session",
+        "candidate artifacts",
+        "unaccepted decisions"
+      ],
+      "transient": [
+        "chat context",
+        "Agent summaries",
+        "temporary logs"
+      ]
+    },
+    "principles": [
+      "制品存在不等于制品完成",
+      "依赖图决定上下文可用性，不替代工程门禁",
+      "人工编辑后必须从磁盘重新派生状态和影响",
+      "活动知识只有经验证和人工接受后才能晋升为稳定知识",
+      "控制状态、制品事实、外部证据和人工判断分离"
+    ],
+    "statuses": [
+      "missing",
+      "blocked",
+      "ready",
+      "available",
+      "complete",
+      "confirmed",
+      "review-required",
+      "promotion-pending"
+    ]
+  }
+}

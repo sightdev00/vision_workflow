@@ -11,14 +11,39 @@ die() {
 usage() {
     cat <<'EOF'
 Usage:
-  tools/problem-session start <topic>
-  tools/problem-session resume
+  tools/problem-session [-a codex|claude] [-i interface] start [--node node-id] <topic>
+  tools/problem-session [-a codex|claude] [-i interface] continue --from <session-file> <topic>
+  tools/problem-session [-a codex|claude] [-i interface] resume
+  tools/problem-session status [--json]
+  tools/problem-session doctor
+  tools/problem-session instructions <node-id> [--json]
+  tools/problem-session review [session-file] [--json]
+  tools/problem-session verify <node-id> [session-file] [--json]
+  tools/problem-session reconcile [session-file] [--artifact artifact-id] [--json]
+  tools/problem-session retain [session-file] [--json]
+  tools/problem-session note <experience|decision> <title> [session-file]
+  tools/problem-session transition <node-id> <state> [decision-record]
   tools/problem-session close <session-file>
 
 Commands:
-  start   Create the next Session record and start a new Codex chat.
-  resume  Resume the only active Session and the latest Codex chat in this worktree.
-  close   Validate, close, and commit only the specified Session record.
+  start       Create a Session attempt for a ready workflow node.
+  continue    Create a new attempt linked to a closed Session.
+  resume      Resume the only active Session and the latest Agent chat.
+  status      Show workflow nodes, blockers, active Session, and next actions.
+  doctor      Validate workflow, node dependencies, and Session bindings.
+  instructions Show a read-only execution snapshot for one workflow node.
+  review      Check human experience/decision cards in a Session.
+  verify      Report completeness, correctness, and coherence for one node.
+  reconcile   Show the Agent protocol for reconciling human edits across artifacts.
+  retain      Show a read-only stable-knowledge promotion plan.
+  note        Append an editable human experience or decision card.
+  transition  Apply a legal workflow-node state transition.
+  close       Validate, close, and commit only the specified Session record.
+
+Options:
+  -a, --agent <codex|claude>   Agent CLI to use (default: codex; override with $PROBLEM_SESSION_AGENT)
+  -i, --interface <name>       Source ~/.<agent>/switch_<name>.sh before starting the Agent
+                               (override with $PROBLEM_SESSION_INTERFACE)
 
 Topic format:
   Lowercase letters, digits, and single hyphens, for example: directory-design
@@ -27,6 +52,21 @@ EOF
 
 require_command() {
     command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+validate_agent() {
+    case "$AGENT" in
+        codex|claude) ;;
+        *) die "unsupported agent: $AGENT (expected: codex or claude)" ;;
+    esac
+}
+
+require_workflow() {
+    require_command jq
+    [[ -f "$WORKFLOW_FILE" ]] ||
+        die "workflow instance not found: ${WORKFLOW_FILE#$REPO_ROOT/}"
+    jq empty "$WORKFLOW_FILE" >/dev/null 2>&1 ||
+        die "invalid workflow JSON: ${WORKFLOW_FILE#$REPO_ROOT/}"
 }
 
 init_context() {
@@ -48,10 +88,12 @@ init_context() {
     SESSION_PLAN="$REPO_ROOT/.problems/$PROBLEM_ID/SESSION-PLAN.md"
     SESSION_DIR_REL=".problems/$PROBLEM_ID/sessions"
     SESSION_DIR="$REPO_ROOT/$SESSION_DIR_REL"
+    WORKFLOW_FILE="$REPO_ROOT/.problems/$PROBLEM_ID/WORKFLOW.json"
 
     [[ -f "$SESSION_PLAN" ]] ||
         die "Session plan not found: ${SESSION_PLAN#$REPO_ROOT/}"
     export SESSION_PLAN
+    export WORKFLOW_FILE
 }
 
 collect_active_sessions() {
@@ -60,7 +102,7 @@ collect_active_sessions() {
 
     local file
     while IFS= read -r -d '' file; do
-        if grep -Fqx -- '- Status: active' "$file"; then
+        if session_has_status "$file" active; then
             ACTIVE_SESSIONS+=("$file")
         fi
     done < <(
@@ -68,6 +110,290 @@ collect_active_sessions() {
             -name "${PROBLEM_PREFIX}-S[0-9][0-9][0-9]-*.md" \
             -print0 | sort -z
     )
+}
+
+session_has_status() {
+    local file="$1" status="$2"
+    grep -Fqx -- "- Status: $status" "$file" ||
+        grep -Fqx -- "- 状态: $status" "$file"
+}
+
+session_metadata_value() {
+    local file="$1" english="$2" chinese="$3"
+    awk -v english="- $english:" -v chinese="- $chinese:" '
+        index($0, english) == 1 || index($0, chinese) == 1 {
+            sub(/^[^:]+:[[:space:]]*/, "")
+            print
+            exit
+        }
+    ' "$file"
+}
+
+apply_session_agent_defaults() {
+    local file="$1" stored_agent stored_interface
+    stored_agent="$(session_metadata_value "$file" 'Agent' '智能体')"
+    stored_interface="$(session_metadata_value "$file" 'Interface' '接口')"
+    if ((AGENT_EXPLICIT == 0)) && [[ -n "$stored_agent" ]]; then
+        AGENT="$stored_agent"
+    fi
+    if ((INTERFACE_EXPLICIT == 0)) && [[ -n "$stored_interface" && "$stored_interface" != current ]]; then
+        INTERFACE="$stored_interface"
+    fi
+}
+
+session_workflow_node() {
+    local file="$1" session_id node
+    node="$(session_metadata_value "$file" 'Workflow Node' '工作流节点')"
+    if [[ -n "$node" ]]; then
+        printf '%s\n' "$node"
+        return 0
+    fi
+
+    require_workflow
+    session_id="$(session_id_from_file "$file")" || return 1
+    jq -r --arg session_id "$session_id" '
+        first(.nodes[] | select((.attempts // []) | index($session_id)) | .id) // empty
+    ' "$WORKFLOW_FILE"
+}
+
+workflow_node_exists() {
+    jq -e --arg node "$1" 'any(.nodes[]; .id == $node)' "$WORKFLOW_FILE" >/dev/null
+}
+
+workflow_node_status() {
+    jq -r --arg node "$1" 'first(.nodes[] | select(.id == $node) | .status) // empty' "$WORKFLOW_FILE"
+}
+
+workflow_attempt_count() {
+    jq -r --arg node "$1" 'first(.nodes[] | select(.id == $node) | ((.attempts // []) | length)) // 0' "$WORKFLOW_FILE"
+}
+
+workflow_dependencies_accepted() {
+    jq -e --arg node "$1" '
+        .nodes as $nodes
+        | (first($nodes[] | select(.id == $node)) // null) as $target
+        | $target != null
+          and all(($target.depends_on // [])[]; . as $dependency
+              | any($nodes[]; .id == $dependency and .status == "accepted"))
+    ' "$WORKFLOW_FILE" >/dev/null
+}
+
+workflow_single_ready_node() {
+    jq -r '[.nodes[] | select(.status == "ready") | .id]
+        | if length == 1 then .[0] else empty end' "$WORKFLOW_FILE"
+}
+
+workflow_update_attempt() {
+    local node="$1" session_id="$2" temporary
+    temporary="$(mktemp "${WORKFLOW_FILE}.attempt.XXXXXX")"
+    trap 'rm -f -- "${temporary:-}"' RETURN
+
+    jq --arg node "$node" --arg session_id "$session_id" '
+        .nodes |= map(
+            if .id == $node then
+                .attempts = (((.attempts // []) + [$session_id]) | unique)
+                | if .status == "ready" then .status = "active" else . end
+            else . end
+        )
+        | .current_nodes = [
+            .nodes[]
+            | select(.status == "active" or .status == "awaiting-human" or
+                     .status == "verifying" or .status == "blocked")
+            | .id
+        ]
+        | .state = (
+            if all(.nodes[]; .status == "accepted" or .status == "superseded") then "completed"
+            elif any(.nodes[]; .status == "awaiting-human") then "awaiting-human"
+            elif any(.nodes[]; .status == "verifying") then "verifying"
+            elif any(.nodes[]; .status == "active") then "active"
+            elif any(.nodes[]; .status == "blocked") then "blocked"
+            else "active" end
+        )
+    ' "$WORKFLOW_FILE" >"$temporary"
+    mv -- "$temporary" "$WORKFLOW_FILE"
+    temporary=''
+}
+
+workflow_transition_allowed() {
+    case "$1:$2" in
+        planned:ready|ready:active|active:awaiting-human|active:verifying|\
+        active:blocked|awaiting-human:active|awaiting-human:verifying|\
+        awaiting-human:rejected|awaiting-human:blocked|verifying:accepted|\
+        verifying:rejected|verifying:active|verifying:blocked|\
+        rejected:ready|rejected:superseded|blocked:ready|blocked:superseded)
+            return 0
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+workflow_apply_transition() {
+    local node="$1" target="$2" decision_record="${3:-}"
+    local current gate_required temporary
+
+    require_workflow
+    workflow_node_exists "$node" || die "workflow node not found: $node"
+    current="$(workflow_node_status "$node")"
+    workflow_transition_allowed "$current" "$target" ||
+        die "illegal workflow transition: $node $current -> $target"
+
+    if [[ "$target" == ready ]] && ! workflow_dependencies_accepted "$node"; then
+        die "workflow node dependencies are not accepted: $node"
+    fi
+
+    if [[ "$target" == ready ]]; then
+        validate_node_contract_ready "$node"
+    fi
+
+    gate_required="$(jq -r --arg node "$node" '
+        first(.nodes[] | select(.id == $node) | .human_gate.required) // false
+    ' "$WORKFLOW_FILE")"
+    if [[ "$gate_required" == true && ("$target" == accepted || "$target" == rejected || "$target" == superseded) ]]; then
+        [[ -n "$decision_record" ]] ||
+            die "transition requires a human decision record: $node -> $target"
+        [[ -f "$decision_record" ]] ||
+            die "human decision record not found: $decision_record"
+        decision_record="$(realpath -m -- "$decision_record")"
+        validate_required_decisions "$node" "$decision_record"
+        case "$decision_record" in
+            "$REPO_ROOT"/*) decision_record="${decision_record#$REPO_ROOT/}" ;;
+            *) die "human decision record must be inside the repository" ;;
+        esac
+    fi
+
+    if [[ "$target" == accepted ]]; then
+        validate_node_artifacts_for_acceptance "$node" "$decision_record"
+    fi
+
+    temporary="$(mktemp "${WORKFLOW_FILE}.transition.XXXXXX")"
+    trap 'rm -f -- "${temporary:-}"' RETURN
+    jq --arg node "$node" --arg target "$target" --arg decision "$decision_record" '
+        .nodes |= map(
+            if .id == $node then
+                .status = $target
+                | if $decision != "" then .human_gate.decision_record = $decision else . end
+            else . end
+        )
+        | .current_nodes = [
+            .nodes[]
+            | select(.status == "active" or .status == "awaiting-human" or
+                     .status == "verifying" or .status == "blocked")
+            | .id
+        ]
+        | .state = (
+            if all(.nodes[]; .status == "accepted" or .status == "superseded") then "completed"
+            elif any(.nodes[]; .status == "awaiting-human") then "awaiting-human"
+            elif any(.nodes[]; .status == "verifying") then "verifying"
+            elif any(.nodes[]; .status == "active") then "active"
+            elif any(.nodes[]; .status == "blocked") then "blocked"
+            else "active" end
+        )
+    ' "$WORKFLOW_FILE" >"$temporary"
+    mv -- "$temporary" "$WORKFLOW_FILE"
+    temporary=''
+    printf 'Transitioned %s: %s -> %s\n' "$node" "$current" "$target"
+}
+
+show_workflow_status() {
+    require_workflow
+    jq -r '
+        "Workflow: \(.workflow_id)  state=\(.state)",
+        "Pattern: \(.pattern.id)@\(.pattern.version)",
+        "",
+        "STATUS\tPHASE\tNODE\tATTEMPTS\tTITLE",
+        (.nodes[] | "\(.status)\t\(.phase)\t\(.id)\t\((.attempts // []) | length)\t\(.title)")
+    ' "$WORKFLOW_FILE"
+
+    collect_active_sessions
+    printf '\nActive Session:\n'
+    if ((${#ACTIVE_SESSIONS[@]} == 0)); then
+        printf '  none\n'
+    else
+        local file
+        for file in "${ACTIVE_SESSIONS[@]}"; do
+            printf '  %s  node=%s\n' "${file#$REPO_ROOT/}" "$(session_workflow_node "$file")"
+        done
+    fi
+}
+
+workflow_doctor() {
+    local errors=0 session_id node file found
+    require_workflow
+
+    if ! jq -e '
+        (.schema_version == "1.0" or .schema_version == "2.0")
+        and (.workflow_id | type == "string" and length > 0)
+        and (.problem_id | type == "string" and length > 0)
+        and (.nodes | type == "array" and length > 0)
+        and (.nodes as $nodes
+            | ($nodes | map(.id)) as $ids
+            | ($ids | length) == ($ids | unique | length)
+            and all($nodes[];
+                (.status | IN("planned", "ready", "active", "awaiting-human", "verifying",
+                              "accepted", "rejected", "blocked", "superseded"))
+                and ((.depends_on // []) as $dependencies
+                    | all($dependencies[]; . as $dependency | $ids | index($dependency) != null))))
+    ' "$WORKFLOW_FILE" >/dev/null; then
+        printf 'ERROR: workflow schema or node graph is invalid\n' >&2
+        errors=$((errors + 1))
+    fi
+
+    if ! jq -e '
+        all(.nodes[];
+            ((.artifacts // []) | map(.id)) as $artifact_ids
+            | ($artifact_ids | length) == ($artifact_ids | unique | length)
+            and all((.artifacts // [])[];
+                (.id | type == "string" and length > 0)
+                and (.kind | IN("stable-input", "human-experience", "analysis",
+                               "evidence", "human-decision", "verification", "promotion"))
+                and (.completion.type | IN("file-nonempty", "section-present",
+                                          "section-nonempty", "cards-confirmed", "node-accepted"))
+                and all((.requires // [])[]; . as $dependency
+                    | $artifact_ids | index($dependency) != null)
+                and all((.impacts // [])[]; . as $impact
+                    | $artifact_ids | index($impact) != null)
+                and ((.path // "") as $path
+                    | ($path == "" or (($path | startswith("/")) | not)
+                       and (($path | split("/")) | index("..") == null))))
+            and (if (.status | IN("ready", "active", "awaiting-human", "verifying"))
+                 and (.artifact_contract.required_before_ready // false)
+                 then ((.artifacts // []) | length) > 0
+                 else true end))
+    ' "$WORKFLOW_FILE" >/dev/null; then
+        printf 'ERROR: workflow artifact contracts are invalid
+' >&2
+        errors=$((errors + 1))
+    fi
+
+    while IFS=$'\t' read -r session_id node; do
+        found=''
+        for file in "$SESSION_DIR"/"$session_id"-*.md; do
+            if [[ -f "$file" ]]; then
+                found="$file"
+                break
+            fi
+        done
+        if [[ -z "$found" ]]; then
+            printf 'ERROR: workflow attempt has no Session file: %s (%s)\n' "$session_id" "$node" >&2
+            errors=$((errors + 1))
+        fi
+    done < <(jq -r '.nodes[] as $node | ($node.attempts // [])[] | [. , $node.id] | @tsv' "$WORKFLOW_FILE")
+
+    collect_active_sessions
+    if ((${#ACTIVE_SESSIONS[@]} > 1)); then
+        printf 'ERROR: multiple active Sessions found\n' >&2
+        errors=$((errors + 1))
+    fi
+    for file in "${ACTIVE_SESSIONS[@]}"; do
+        node="$(session_workflow_node "$file")"
+        if [[ -z "$node" ]] || ! workflow_node_exists "$node"; then
+            printf 'ERROR: active Session is not bound to a workflow node: %s\n' "${file#$REPO_ROOT/}" >&2
+            errors=$((errors + 1))
+        fi
+    done
+
+    ((errors == 0)) || die "workflow doctor found $errors error(s)"
+    printf 'Workflow doctor: OK\n'
 }
 
 session_id_from_file() {
@@ -101,6 +427,7 @@ next_session_id() {
 
 write_session_template() {
     local file="$1" session_id="$2" topic="$3"
+    local workflow_node="$4" attempt="$5" parent_session="$6"
     local started branch_commit
     started="$(date --iso-8601=seconds)"
     branch_commit="$(git rev-parse HEAD)"
@@ -111,35 +438,51 @@ write_session_template() {
     if ! cat >"$file" <<EOF
 # $session_id $topic
 
-- Problem: $PROBLEM_ID
-- Session: $session_id
-- Status: active
-- Started: $started
-- Branch: $BRANCH
-- Base commit: $branch_commit
+- 问题: $PROBLEM_ID
+- 会话: $session_id
+- 状态: active
+- 开始时间: $started
+- 分支: $BRANCH
+- 基线提交: $branch_commit
+- 工作流: $(jq -r '.workflow_id' "$WORKFLOW_FILE")
+- 工作流节点: $workflow_node
+- 执行尝试: $attempt
+- 父会话: $parent_session
+- Agent: $AGENT
+- 接口: ${INTERFACE:-current}
 
-## Objective
-
-
-## Inputs
-
-
-## Evidence
-
-
-## Decisions
+## 目标
 
 
-## Changes
+## 输入
 
 
-## Verification
+## 人工经验输入
+
+<!-- 使用H-001、H-002等稳定标识；用户可以直接修改、增删和勾选。 -->
 
 
-## Unresolved
+## 人工决策
+
+<!-- 使用D-001、D-002等稳定标识；只有用户可以确认决定。 -->
 
 
-## Next Session
+## 证据
+
+
+## 决策
+
+
+## 变更
+
+
+## 验证
+
+
+## 未解决
+
+
+## 下一会话
 
 EOF
     then
@@ -150,9 +493,18 @@ EOF
 }
 
 require_section_content() {
-    local file="$1" section="$2"
-    awk -v heading="## $section" '
-        $0 == heading {
+    local file="$1" section="$2" localized
+    case "$section" in
+        Evidence) localized='证据' ;;
+        Decisions) localized='决策' ;;
+        Verification) localized='验证' ;;
+        Unresolved) localized='未解决' ;;
+        'Next Session') localized='下一会话' ;;
+        *) localized="$section" ;;
+    esac
+
+    awk -v heading="## $section" -v localized_heading="## $localized" '
+        $0 == heading || $0 == localized_heading {
             found = 1
             inside = 1
             next
@@ -167,6 +519,24 @@ require_section_content() {
             exit !(found && content)
         }
     ' "$file" || die "section is missing or empty: $section"
+}
+
+configure_agent_interface() {
+    local switch_script
+    validate_agent
+    [[ -n "$INTERFACE" ]] || return 0
+    [[ "$INTERFACE" =~ ^[a-z0-9]+([_-][a-z0-9]+)*$ ]] ||
+        die "interface must use lowercase letters, digits, underscores, or single hyphens"
+
+    switch_script="$HOME/.$AGENT/switch_$INTERFACE.sh"
+    [[ -f "$switch_script" ]] ||
+        die "interface switch script not found: $switch_script"
+    [[ -r "$switch_script" ]] ||
+        die "interface switch script is not readable: $switch_script"
+
+    printf 'Switching %s interface with %s\n' "$AGENT" "$switch_script"
+    # shellcheck source=/dev/null
+    source "$switch_script"
 }
 
 resolve_session_file() {
@@ -185,36 +555,97 @@ resolve_session_file() {
     printf '%s\n' "$resolved"
 }
 
-start_session() {
-    local topic="${1:-}" session_id session_file session_file_rel prompt
+launch_agent() {
+    # Runs in REPO_ROOT; starts a new interactive Agent chat with the given prompt.
+    case "$AGENT" in
+        codex) codex -C "$REPO_ROOT" "$1" ;;
+        claude) claude "$1" ;;
+    esac
+}
+
+resume_agent() {
+    # Runs in REPO_ROOT; resumes the most recent Agent chat in this worktree.
+    case "$AGENT" in
+        codex) codex -C "$REPO_ROOT" resume --last ;;
+        claude) claude --continue ;;
+    esac
+}
+
+create_session_attempt() {
+    local node="$1" topic="$2" parent_session="$3"
+    local node_status attempt session_id session_file session_file_rel prompt
+
+    require_workflow
     [[ "$topic" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] ||
         die "topic must use lowercase letters, digits, and single hyphens"
+    workflow_node_exists "$node" || die "workflow node not found: $node"
+    node_status="$(workflow_node_status "$node")"
 
-    require_command codex
+    if [[ "$parent_session" == none ]]; then
+        [[ "$node_status" == ready ]] ||
+            die "new Session requires a ready workflow node; got $node=$node_status"
+    else
+        [[ "$node_status" == active || "$node_status" == ready ]] ||
+            die "continued Session requires an active or ready node; got $node=$node_status"
+    fi
+    workflow_dependencies_accepted "$node" ||
+        die "workflow node dependencies are not accepted: $node"
+
     collect_active_sessions
     if ((${#ACTIVE_SESSIONS[@]} > 0)); then
         die "an active Session already exists: ${ACTIVE_SESSIONS[0]#$REPO_ROOT/}; use '$PROGRAM_NAME resume'"
     fi
 
+    configure_agent_interface
+    require_command "$AGENT"
+
     mkdir -p "$SESSION_DIR"
+    attempt="$(( $(workflow_attempt_count "$node") + 1 ))"
     session_id="$(next_session_id)"
     session_file_rel="$SESSION_DIR_REL/$session_id-$topic.md"
     session_file="$REPO_ROOT/$session_file_rel"
-    write_session_template "$session_file" "$session_id" "$topic"
+    write_session_template "$session_file" "$session_id" "$topic" "$node" "$attempt" "$parent_session"
+    workflow_update_attempt "$node" "$session_id"
 
     export PROBLEM_ID
     export SESSION_ID="$session_id"
     export SESSION_FILE="$session_file"
+    export WORKFLOW_NODE="$node"
 
-    prompt="当前 Problem 为 $PROBLEM_ID，当前 Session 为 $SESSION_ID，Session 计划为 ${SESSION_PLAN#$REPO_ROOT/}，Session 记录文件为 $session_file_rel。读取 AGENTS.md、${SESSION_PLAN#$REPO_ROOT/} 和 $session_file_rel；只处理当前 Session 的目标，先与用户明确本次 Objective 和结束条件，再开展工作；在工作过程中持续更新 Session 记录。只有用户明确表示该 Session 可以结束时，才先更新并提交 Session Plan，再按 AGENTS.md 调用 tools/problem-session close。"
+    prompt="当前问题为 $PROBLEM_ID，工作流为 $(jq -r '.workflow_id' "$WORKFLOW_FILE")，当前节点为 $node，当前会话为 $SESSION_ID，执行尝试为 $attempt，父会话为 $parent_session。读取 AGENTS.md、${WORKFLOW_FILE#$REPO_ROOT/}、${SESSION_PLAN#$REPO_ROOT/} 和 $session_file_rel；只处理当前工作流节点允许的目标，先确认节点输入、Oracle、人工门禁和结束条件；持续更新会话证据、决策、变更和验证。会话关闭不等于节点接受；Agent只能提出状态转换建议，要求人工门禁的转换必须引用人工决策记录。"
 
-    printf 'Starting %s\nSession file: %s\n' "$SESSION_ID" "$session_file_rel"
-    codex -C "$REPO_ROOT" "$prompt"
+    printf 'Starting %s\nWorkflow node: %s\nAttempt: %s\nSession file: %s\n' \
+        "$SESSION_ID" "$node" "$attempt" "$session_file_rel"
+    launch_agent "$prompt"
+}
+
+start_session() {
+    local node="$1" topic="$2"
+    if [[ -z "$node" ]]; then
+        node="$(workflow_single_ready_node)"
+        [[ -n "$node" ]] ||
+            die "--node is required unless exactly one workflow node is ready"
+    fi
+    create_session_attempt "$node" "$topic" none
+}
+
+continue_session() {
+    local requested="$1" topic="$2" parent_file parent_id node
+    parent_file="$(resolve_session_file "$requested")"
+    session_has_status "$parent_file" closed ||
+        die "only a closed Session can be continued: ${parent_file#$REPO_ROOT/}"
+    parent_id="$(session_id_from_file "$parent_file")" ||
+        die "cannot derive Session ID from ${parent_file##*/}"
+    node="$(session_workflow_node "$parent_file")"
+    [[ -n "$node" ]] ||
+        die "cannot derive workflow node from ${parent_file##*/}"
+
+    apply_session_agent_defaults "$parent_file"
+    create_session_attempt "$node" "$topic" "$parent_id"
 }
 
 resume_session() {
     local session_file session_id
-    require_command codex
     collect_active_sessions
 
     ((${#ACTIVE_SESSIONS[@]} > 0)) || die "no active Session found; use '$PROGRAM_NAME start <topic>'"
@@ -224,13 +655,19 @@ resume_session() {
     session_id="$(session_id_from_file "$session_file")" ||
         die "cannot derive Session ID from ${session_file##*/}"
 
+    apply_session_agent_defaults "$session_file"
+    configure_agent_interface
+    require_command "$AGENT"
+
     export PROBLEM_ID
     export SESSION_ID="$session_id"
     export SESSION_FILE="$session_file"
+    WORKFLOW_NODE="$(session_workflow_node "$session_file")"
+    export WORKFLOW_NODE
 
     printf 'Resuming %s\nSession file: %s\n' \
         "$SESSION_ID" "${SESSION_FILE#$REPO_ROOT/}"
-    codex -C "$REPO_ROOT" resume --last
+    resume_agent
 }
 
 close_session() {
@@ -243,7 +680,7 @@ close_session() {
         die "cannot derive Session ID from ${session_file##*/}"
     session_seq="${session_id##*-}"
 
-    grep -Fqx -- '- Status: active' "$session_file" ||
+    session_has_status "$session_file" active ||
         die "Session is not active: $session_file_rel"
 
     require_section_content "$session_file" 'Evidence'
@@ -267,6 +704,11 @@ close_session() {
             print "- Ended: " ended
             next
         }
+        $0 == "- 状态: active" {
+            print "- 状态: closed"
+            print "- 结束时间: " ended
+            next
+        }
         { print }
     ' "$session_file" >"$temporary"
     chmod --reference="$session_file" "$temporary"
@@ -278,6 +720,8 @@ close_session() {
         sed -i \
             -e 's/^- Status: closed$/- Status: active/' \
             -e '/^- Ended: /d' \
+            -e 's/^- 状态: closed$/- 状态: active/' \
+            -e '/^- 结束时间: /d' \
             "$session_file"
         git reset --quiet -- "$session_file_rel" || true
         die "Git commit failed; Session was restored to active"
@@ -286,8 +730,51 @@ close_session() {
     printf 'Closed and committed %s\n' "$session_id"
 }
 
+# shellcheck source=problem-session-workflow.sh
+source "$(dirname -- "$(realpath -- "$0")")/problem-session-workflow.sh"
+
 main() {
-    local command="${1:-}"
+    local command='' node='' from='' requested='' json=false kind='' title='' artifact=''
+    AGENT="${PROBLEM_SESSION_AGENT:-codex}"
+    INTERFACE="${PROBLEM_SESSION_INTERFACE:-}"
+    AGENT_EXPLICIT=0
+    INTERFACE_EXPLICIT=0
+    [[ -n "${PROBLEM_SESSION_AGENT:-}" ]] && AGENT_EXPLICIT=1
+    [[ -n "${PROBLEM_SESSION_INTERFACE:-}" ]] && INTERFACE_EXPLICIT=1
+
+    while (($# > 0)); do
+        case "$1" in
+            -a|--agent)
+                (($# >= 2)) || die "option $1 requires an argument"
+                AGENT="$2"
+                AGENT_EXPLICIT=1
+                shift 2
+                ;;
+            --agent=*)
+                AGENT="${1#*=}"
+                AGENT_EXPLICIT=1
+                shift
+                ;;
+            -i|--interface)
+                (($# >= 2)) || die "option $1 requires an argument"
+                INTERFACE="$2"
+                INTERFACE_EXPLICIT=1
+                shift 2
+                ;;
+            --interface=*)
+                INTERFACE="${1#*=}"
+                INTERFACE_EXPLICIT=1
+                shift
+                ;;
+            --)
+                shift
+                break
+                ;;
+            *) break ;;
+        esac
+    done
+
+    command="${1:-}"
     [[ -n "$command" ]] || {
         usage
         exit 2
@@ -295,15 +782,140 @@ main() {
     shift
 
     init_context
+    validate_agent
 
     case "$command" in
         start)
-            (($# == 1)) || die "usage: $PROGRAM_NAME start <topic>"
-            start_session "$1"
+            if [[ "${1:-}" == --node ]]; then
+                (($# >= 2)) || die "option --node requires an argument"
+                node="$2"
+                shift 2
+            elif [[ "${1:-}" == --node=* ]]; then
+                node="${1#*=}"
+                shift
+            fi
+            (($# == 1)) ||
+                die "usage: $PROGRAM_NAME [-a codex|claude] [-i interface] start [--node node-id] <topic>"
+            start_session "$node" "$1"
+            ;;
+        continue)
+            if [[ "${1:-}" == --from ]]; then
+                (($# >= 2)) || die "option --from requires an argument"
+                from="$2"
+                shift 2
+            elif [[ "${1:-}" == --from=* ]]; then
+                from="${1#*=}"
+                shift
+            else
+                die "continue requires --from <session-file>"
+            fi
+            (($# == 1)) ||
+                die "usage: $PROGRAM_NAME [-a codex|claude] [-i interface] continue --from <session-file> <topic>"
+            continue_session "$from" "$1"
             ;;
         resume)
-            (($# == 0)) || die "usage: $PROGRAM_NAME resume"
+            (($# == 0)) || die "usage: $PROGRAM_NAME [-a codex|claude] [-i interface] resume"
             resume_session
+            ;;
+        status)
+            if [[ "${1:-}" == --json ]]; then
+                json=true
+                shift
+            fi
+            (($# == 0)) || die "usage: $PROGRAM_NAME status [--json]"
+            show_workflow_status "$json"
+            ;;
+        instructions)
+            (($# >= 1 && $# <= 2)) || die "usage: $PROGRAM_NAME instructions <node-id> [--json]"
+            node="$1"
+            shift
+            if [[ "${1:-}" == --json ]]; then
+                json=true
+                shift
+            fi
+            (($# == 0)) || die "usage: $PROGRAM_NAME instructions <node-id> [--json]"
+            show_node_instructions "$node" "$json"
+            ;;
+        review)
+            if (($# > 0)) && [[ "${1:-}" != --json ]]; then
+                requested="$1"
+                shift
+            fi
+            if [[ "${1:-}" == --json ]]; then
+                json=true
+                shift
+            fi
+            (($# == 0)) || die "usage: $PROGRAM_NAME review [session-file] [--json]"
+            review_session_cards "$requested" "$json"
+            ;;
+        verify)
+            (($# >= 1 && $# <= 3)) || die "usage: $PROGRAM_NAME verify <node-id> [session-file] [--json]"
+            node="$1"
+            shift
+            if (($# > 0)) && [[ "${1:-}" != --json ]]; then
+                requested="$1"
+                shift
+            fi
+            if [[ "${1:-}" == --json ]]; then
+                json=true
+                shift
+            fi
+            (($# == 0)) || die "usage: $PROGRAM_NAME verify <node-id> [session-file] [--json]"
+            verify_workflow_node "$node" "$requested" "$json"
+            ;;
+        reconcile)
+            while (($# > 0)); do
+                case "$1" in
+                    --json)
+                        json=true
+                        shift
+                        ;;
+                    --artifact)
+                        (($# >= 2)) || die "option --artifact requires an argument"
+                        artifact="$2"
+                        shift 2
+                        ;;
+                    --artifact=*)
+                        artifact="${1#*=}"
+                        shift
+                        ;;
+                    *)
+                        [[ -z "$requested" ]] ||
+                            die "usage: $PROGRAM_NAME reconcile [session-file] [--artifact artifact-id] [--json]"
+                        requested="$1"
+                        shift
+                        ;;
+                esac
+            done
+            show_reconcile_context "$requested" "$json" "$artifact"
+            ;;
+        retain)
+            if (($# > 0)) && [[ "${1:-}" != --json ]]; then
+                requested="$1"
+                shift
+            fi
+            if [[ "${1:-}" == --json ]]; then
+                json=true
+                shift
+            fi
+            (($# == 0)) || die "usage: $PROGRAM_NAME retain [session-file] [--json]"
+            show_retention_plan "$requested" "$json"
+            ;;
+        note)
+            (($# >= 2 && $# <= 3)) || die "usage: $PROGRAM_NAME note <experience|decision> <title> [session-file]"
+            kind="$1"
+            title="$2"
+            requested="${3:-}"
+            append_session_card "$kind" "$title" "$requested"
+            ;;
+        doctor)
+            (($# == 0)) || die "usage: $PROGRAM_NAME doctor"
+            workflow_doctor
+            ;;
+        transition)
+            (($# == 2 || $# == 3)) ||
+                die "usage: $PROGRAM_NAME transition <node-id> <state> [decision-record]"
+            workflow_apply_transition "$1" "$2" "${3:-}"
             ;;
         close)
             (($# == 1)) || die "usage: $PROGRAM_NAME close <session-file>"
