@@ -1,0 +1,56 @@
+id: S001
+name: problem-frame
+status: closed
+
+intent:
+  establish_problem_boundary_and_governance
+
+initial_state:
+  problem_stage: INTAKE
+  knowledge_confidence: low
+
+hypothesis:
+  - id: H001
+    statement: P-001 requires a controlled audit before runtime unification decisions.
+    confidence: 0.8
+
+actions:
+  - inspect_problem_structure
+  - establish_session_plan
+  - validate_initial_manifest_presence
+  - define_session_governance_rules
+
+inputs:
+  - AGENTS.md
+  - SESSION-PLAN.md
+  - manifests/source-baselines.yaml
+
+outputs:
+  - problem_scope
+  - session_roadmap
+  - governance_rules
+
+
+evidence:
+  - id: E-S001-001
+    observation: "SESSION-PLAN defines S001-S020 roadmap"
+    confidence: 0.9
+  - id: E-S001-002
+    observation: "source-baselines.yaml exists and is parseable"
+    confidence: 0.9
+
+interpretation:
+  - The problem is sufficiently framed but technical architecture evidence is still missing.
+
+state_transition:
+  problem:
+    from: INTAKE
+    to: FRAME
+  unknowns:
+    - source_code_responsibility
+    - runtime_call_chain
+    - platform_equivalence
+
+next:
+  session: S002
+  objective: source-baseline-validation
