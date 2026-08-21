@@ -1,0 +1,31 @@
+# Session Epistemic Mapping
+
+sessions:
+  - id: S001
+    pattern:
+      - Hypothesis
+      - Action
+      - Evidence
+      - State Transition
+    purpose: problem framing and governance
+
+  - id: S002
+    pattern:
+      - Hypothesis
+      - Action
+      - Evidence
+      - State Transition
+    purpose: source baseline validation
+
+mapping_rules:
+  hypothesis:
+    description: "What we believe before execution"
+  action:
+    description: "What the agent or human performs"
+  evidence:
+    description: "Observed result produced by action"
+  state_transition:
+    description: "How confidence, understanding or decisions change"
+
+note:
+  "S003-S009 will be migrated using the same structure after reviewing original session artifacts."
