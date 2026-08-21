@@ -1,0 +1,18 @@
+id: X000
+
+type: architecture_pattern
+
+statement: >
+  Platform-specific acceleration APIs should be isolated behind
+  a runtime boundary.
+
+applicable_to:
+  - embedded AI deployment
+
+anti_pattern: >
+  Algorithm business layer directly depends on NPU SDK.
+
+source_problem:
+  P-001-vision-runtime-code-unification
+
+maturity: candidate
