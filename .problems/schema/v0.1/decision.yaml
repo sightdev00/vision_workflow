@@ -1,0 +1,21 @@
+# Decision Schema v0.1
+
+id: DXXX
+
+type: architecture
+
+question: ""
+
+alternatives:
+  - option: ""
+    rejected_reason: ""
+
+selected: ""
+
+reasoning: ""
+
+owner: human
+
+based_on:
+  - evidence_id
+  - interpretation_id
